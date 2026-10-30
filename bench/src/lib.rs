@@ -100,5 +100,6 @@ pub fn cases() -> Vec<Case> {
     set_cases!(out, tickers100);
     set_cases!(out, random3000);
     set_cases!(out, hard_prefix);
+    set_cases!(out, long_paths);
     out
 }

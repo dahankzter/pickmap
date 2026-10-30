@@ -92,6 +92,20 @@ pub fn hard_prefix() -> KeySet {
     KeySet { name: "hard_prefix", keys: (0..500).map(|i| format!("/api/v1/items/{i:05}/detail")).collect() }
 }
 
+/// 200 URL paths: 150 over 32 bytes that share long prefixes and suffixes, and 50 short.
+pub fn long_paths() -> KeySet {
+    let keys = (0..200)
+        .map(|i| {
+            if i % 4 == 0 {
+                format!("/r/{i}")
+            } else {
+                format!("/v2/organizations/acme-{i:04}/repositories/main/settings")
+            }
+        })
+        .collect();
+    KeySet { name: "long_paths", keys }
+}
+
 pub fn all() -> Vec<KeySet> {
     vec![
         http_methods(),
@@ -103,6 +117,7 @@ pub fn all() -> Vec<KeySet> {
         tickers100(),
         random3000(),
         hard_prefix(),
+        long_paths(),
     ]
 }
 

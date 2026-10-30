@@ -97,7 +97,8 @@ mod tests {
             let keys = bytes(&set.keys);
             let repr = repr_for(&keys);
             let mut by_len: HashMap<usize, HashSet<Vec<u64>>> = HashMap::new();
-            for k in &keys {
+            // Keys over 32 bytes are compared byte by byte; their value is never used.
+            for k in keys.iter().filter(|k| k.len() <= 32) {
                 assert!(by_len.entry(k.len()).or_default().insert(repr.value(k)), "{}: {repr:?}", set.name);
             }
         }

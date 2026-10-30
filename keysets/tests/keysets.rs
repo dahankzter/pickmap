@@ -10,7 +10,7 @@ fn key_set(set: &KeySet) -> HashSet<&str> {
 fn sizes() {
     let sets = all();
     let lens: Vec<usize> = sets.iter().map(|s| s.keys.len()).collect();
-    assert_eq!(lens, [9, 56, 53, 1000, 12, 46, 100, 3000, 500]);
+    assert_eq!(lens, [9, 56, 53, 1000, 12, 46, 100, 3000, 500, 200]);
     for set in &sets {
         assert_eq!(key_set(set).len(), set.keys.len(), "duplicate key in {}", set.name);
     }
@@ -66,4 +66,12 @@ fn mixed_is_roughly_half() {
 fn hard_prefix_shape() {
     let set = keysets::hard_prefix();
     assert!(set.keys.iter().all(|k| k.len() == 26 && k.starts_with("/api/v1/items/")));
+}
+
+#[test]
+fn long_paths_shape() {
+    let set = keysets::long_paths();
+    let long = set.keys.iter().filter(|k| k.len() > 32).count();
+    assert_eq!(long, 150);
+    assert!(set.keys.iter().all(|k| k.starts_with('/')));
 }

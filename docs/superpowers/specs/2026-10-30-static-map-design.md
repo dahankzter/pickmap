@@ -158,7 +158,7 @@ Empty slots carry a length no input can have.
   - it sinks a `pure` asm block.
 
   What held is an **optimization barrier**: an empty, non-`pure` `asm!` block that takes and returns a register value, touches no memory and emits no instructions. This is the constant-time-code technique. It is allowed in the runtime crate, with a `// SAFETY:` comment, and compiled out under Miri.
-- A **branch-miss guard** protects this. It runs every benchmark key set through a lookup loop on shuffled hit-only and miss-only streams, reads hardware branch-miss counters, and fails above 0.03 misses per lookup. Measuring behavior is sturdier than counting jumps in disassembly, which also contains harmless loop and bounds-check branches.
+- A **branch-miss guard** protects this. It runs every benchmark key set through a lookup loop on shuffled hit-only and miss-only streams, reads hardware branch-miss counters, and fails above 0.03 misses per lookup. Maps with keys over 32 bytes are measured but exempt: their length-dependent hashing and byte compare mispredict on mixed-length streams (about 0.3-0.5 per lookup on `long_paths`). Without hardware counters the guard fails, unless `PICKMAP_NO_PERF_COUNTERS=1` asks it to skip. Measuring behavior is sturdier than counting jumps in disassembly, which also contains harmless loop and bounds-check branches.
 - SIMD is not used. Every load lands in general registers, and the spike found no need for it.
 
 ## Testing

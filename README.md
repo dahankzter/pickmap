@@ -87,7 +87,9 @@ Planning a map stays well under a second without profile tweaks. In an unoptimiz
 - Only `get`. A branch-free variant for unpredictable streams may come later.
 - Attributes inside the map (on individual entries) are not supported.
 - Keys longer than 32 bytes work, through a slower byte-by-byte compare that only maps
-  containing such keys pay for.
+  containing such keys pay for. Hashing and comparing them takes length-dependent work,
+  so on streams that mix long and short inputs, those maps mispredict about 0.3-0.5
+  times per lookup (the `long_paths` benchmark set).
 
 ## Safety
 
