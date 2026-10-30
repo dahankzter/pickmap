@@ -2,8 +2,8 @@
 
 use std::collections::HashSet;
 
-use pickmap_core::hash::{h_long, h_value, picked_slot, pthash_slot};
-use pickmap_core::slot::{MAX_KEY_LEN, Slot};
+use pickmap_core::hash::{h_long, h_value, hash_tag, picked_slot, pthash_slot};
+use pickmap_core::slot::{MAX_KEY_LEN, Slot, meta};
 
 use crate::repr::{Repr, repr_for};
 use crate::search::{Strategy, search, slot_of, table_len};
@@ -38,26 +38,42 @@ pub fn plan(keys: &[&str]) -> Result<Plan, String> {
 }
 
 impl Plan {
+    /// The PtHash hash generated code computes for `k`.
+    fn pthash_h(&self, seed: u64, k: &[u8], v: &[u64]) -> u64 {
+        let n = k.len();
+        if self.has_long && n > 32 {
+            return h_long(k, seed);
+        }
+        match v.len() {
+            1 => h_value(&[v[0]], n, seed),
+            2 => h_value(&[v[0], v[1]], n, seed),
+            _ => h_value(&[v[0], v[1], v[2], v[3]], n, seed),
+        }
+    }
+
+    /// Whether slots carry a tag: PtHash maps get one nearly free from their hash.
+    pub fn tagged(&self) -> bool {
+        matches!(self.strategy, Strategy::PtHash { .. })
+    }
+
+    /// The slot generated code computes for `k`, and the slot `meta` that `k` matches:
+    /// its length, plus its tag on tagged maps.
+    pub fn slot_and_meta(&self, k: &[u8]) -> (usize, u32) {
+        let v = self.repr.value(k);
+        match &self.strategy {
+            Strategy::Picked { positions, asso, mask } => (picked_slot(k, positions, asso, *mask), k.len() as u32),
+            Strategy::PtHash { seed, bucket_bits, pilots, mask } => {
+                let h = self.pthash_h(*seed, k, &v);
+                (pthash_slot(h, *bucket_bits, pilots, *mask), meta(k.len(), hash_tag(h)))
+            }
+        }
+    }
+
     /// What the emitted `get` returns for `key`, computed the same way.
     pub fn lookup(&self, keys: &[&str], key: &str) -> Option<usize> {
         let k = key.as_bytes();
-        let n = k.len();
         let v = self.repr.value(k);
-        let slot = match &self.strategy {
-            Strategy::Picked { positions, asso, mask } => picked_slot(k, positions, asso, *mask),
-            Strategy::PtHash { seed, bucket_bits, pilots, mask } => {
-                let h = if self.has_long && n > 32 {
-                    h_long(k, *seed)
-                } else {
-                    match v.len() {
-                        1 => h_value(&[v[0]], n, *seed),
-                        2 => h_value(&[v[0], v[1]], n, *seed),
-                        _ => h_value(&[v[0], v[1], v[2], v[3]], n, *seed),
-                    }
-                };
-                pthash_slot(h, *bucket_bits, pilots, *mask)
-            }
-        };
+        let (slot, input_meta) = self.slot_and_meta(k);
         // Build the slot exactly as the emitter does and ask core, like generated code.
         macro_rules! find {
             ($words:literal) => {{
@@ -65,11 +81,17 @@ impl Plan {
                     None => Slot::<$words>::EMPTY,
                     Some(i) => {
                         let stored = keys[i as usize].as_bytes();
-                        Slot { key: self.repr.value(stored).try_into().unwrap(), len: stored.len() as u32, idx: i }
+                        let key = self.repr.value(stored).try_into().unwrap();
+                        Slot { key, meta: self.slot_and_meta(stored).1, idx: i }
                     }
                 };
                 let v: [u64; $words] = v.clone().try_into().unwrap();
-                if self.has_long { slot.find_long(&v, k, keys) } else { slot.find(&v, n) }
+                match (self.tagged(), self.has_long) {
+                    (false, false) => slot.find(&v, k.len()),
+                    (false, true) => slot.find_long(&v, k, keys),
+                    (true, false) => slot.find_tagged(&v, input_meta),
+                    (true, true) => slot.find_tagged_long(&v, input_meta, k, keys),
+                }
             }};
         }
         match self.repr.words() {

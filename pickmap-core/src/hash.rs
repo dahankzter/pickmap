@@ -92,3 +92,10 @@ pub fn pthash_bucket(h: u64, bucket_bits: u32) -> usize {
 pub fn pthash_slot(h: u64, bucket_bits: u32, pilots: &[u32], mask: u32) -> usize {
     ((h as u32 ^ pilots[pthash_bucket(h, bucket_bits)]) & mask) as usize
 }
+
+/// 8-bit tag of a full key hash, for PtHash maps: bits 40..48, which the slot (low 32
+/// bits) doesn't use and the bucket (top bits) uses only for maps of 2^17+ keys.
+#[inline(always)]
+pub fn hash_tag(h: u64) -> u8 {
+    (h >> 40) as u8
+}

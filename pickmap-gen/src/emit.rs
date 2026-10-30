@@ -114,9 +114,9 @@ fn lookup(
         Some(i) => {
             let key = input.entries[*i as usize].key.as_bytes();
             let words = plan.repr.value(key).into_iter().map(Literal::u64_suffixed);
-            let len = Literal::u32_suffixed(key.len() as u32);
+            let meta = Literal::u32_suffixed(plan.slot_and_meta(key).1);
             let idx = Literal::u32_suffixed(*i);
-            quote!(#p::Slot { key: [#(#words),*], len: #len, idx: #idx })
+            quote!(#p::Slot { key: [#(#words),*], meta: #meta, idx: #idx })
         }
     });
 
@@ -133,7 +133,9 @@ fn lookup(
                     const POSITIONS: [#p::Pos; #k] = [#(#positions),*];
                     static ASSO: [[::core::primitive::u16; 256]; #k] = [#(#asso),*];
                 },
-                quote!(#p::picked_slot(k, &POSITIONS, &ASSO, #mask)),
+                quote! {
+                    let slot = #p::picked_slot(k, &POSITIONS, &ASSO, #mask);
+                },
             )
         }
         Strategy::PtHash { seed, bucket_bits, pilots, mask } => {
@@ -145,15 +147,20 @@ fn lookup(
             };
             (
                 quote! { static PILOTS: [::core::primitive::u32; #b] = [#(#pilots),*]; },
-                quote!(#p::pthash_slot(#h, #bucket_bits, &PILOTS, #mask)),
+                quote! {
+                    let h = #h;
+                    let slot = #p::pthash_slot(h, #bucket_bits, &PILOTS, #mask);
+                    let meta = #p::meta(k.len(), #p::hash_tag(h));
+                },
             )
         }
     };
 
-    let find = if plan.has_long {
-        quote!(SLOTS[slot].find_long(&v, k, &#keys_name))
-    } else {
-        quote!(SLOTS[slot].find(&v, k.len()))
+    let find = match (plan.tagged(), plan.has_long) {
+        (false, false) => quote!(SLOTS[slot].find(&v, k.len())),
+        (false, true) => quote!(SLOTS[slot].find_long(&v, k, &#keys_name)),
+        (true, false) => quote!(SLOTS[slot].find_tagged(&v, meta)),
+        (true, true) => quote!(SLOTS[slot].find_tagged_long(&v, meta, k, &#keys_name)),
     };
 
     quote! {
@@ -164,7 +171,7 @@ fn lookup(
 
             let k = key.as_bytes();
             let v = #value_expr;
-            let slot = #slot_expr;
+            #slot_expr
             match #find {
                 ::core::option::Option::Some(i) => ::core::option::Option::Some(&#values_name[i]),
                 ::core::option::Option::None => ::core::option::Option::None,
