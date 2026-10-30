@@ -157,3 +157,24 @@ mod inner {
 fn visibility() {
     assert_eq!(inner::INNER.get("k"), Some(&7));
 }
+
+mod user_names_in_values {
+    use pickmap::static_map;
+
+    static KEYS: [&str; 2] = ["user-x", "user-y"];
+    static VALUES: [u8; 2] = [7, 8];
+
+    static_map! { K: &'static str; "a" => KEYS[0], "b" => KEYS[1] }
+    static_map! { V: u8; "a" => VALUES[1] }
+
+    pub fn check() {
+        assert_eq!(K.get("a"), Some(&"user-x"));
+        assert_eq!(K.get("b"), Some(&"user-y"));
+        assert_eq!(V.get("a"), Some(&8));
+    }
+}
+
+#[test]
+fn values_resolve_in_user_scope() {
+    user_names_in_values::check();
+}

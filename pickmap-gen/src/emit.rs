@@ -11,6 +11,10 @@ use crate::search::Strategy;
 pub fn emit(input: &MapInput, plan: &Plan) -> TokenStream {
     let MapInput { vis, name, value_ty: ty, entries } = input;
     let ty_name = format_ident!("__Pickmap_{}", name);
+    // At module level, not inside the `const _` block: value expressions must resolve
+    // names in the user's scope, not see these.
+    let keys_name = format_ident!("__PICKMAP_{}_KEYS", name);
+    let values_name = format_ident!("__PICKMAP_{}_VALUES", name);
     let p = quote!(::pickmap::__private);
     let n = entries.len();
     let keys: Vec<Literal> = entries.iter().map(|e| Literal::string(&e.key)).collect();
@@ -24,7 +28,7 @@ pub fn emit(input: &MapInput, plan: &Plan) -> TokenStream {
             }
         }
     } else {
-        lookup(input, plan, &p, ty)
+        lookup(input, plan, &p, ty, &keys_name, &values_name)
     };
 
     quote! {
@@ -34,10 +38,14 @@ pub fn emit(input: &MapInput, plan: &Plan) -> TokenStream {
 
         #vis static #name: #ty_name = #ty_name;
 
-        const _: () = {
-            static KEYS: [&::core::primitive::str; #n] = [#(#keys),*];
-            static VALUES: [#ty; #n] = [#(#values),*];
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals)]
+        static #keys_name: [&::core::primitive::str; #n] = [#(#keys),*];
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals)]
+        static #values_name: [#ty; #n] = [#(#values),*];
 
+        const _: () = {
             impl #ty_name {
                 #tables_and_get
 
@@ -59,7 +67,7 @@ pub fn emit(input: &MapInput, plan: &Plan) -> TokenStream {
                 /// All entries, in declaration order.
                 #[inline]
                 pub fn iter(&self) -> #p::Iter<#ty> {
-                    #p::Iter::new(&KEYS, &VALUES)
+                    #p::Iter::new(&#keys_name, &#values_name)
                 }
             }
 
@@ -85,9 +93,15 @@ pub fn emit(input: &MapInput, plan: &Plan) -> TokenStream {
     }
 }
 
-/// The slot tables, strategy tables and `get` for a non-empty map. These items sit in
-/// the same `const _` block as `KEYS` and `VALUES`.
-fn lookup(input: &MapInput, plan: &Plan, p: &TokenStream, ty: &TokenStream) -> TokenStream {
+/// The slot tables, strategy tables and `get` for a non-empty map.
+fn lookup(
+    input: &MapInput,
+    plan: &Plan,
+    p: &TokenStream,
+    ty: &TokenStream,
+    keys_name: &proc_macro2::Ident,
+    values_name: &proc_macro2::Ident,
+) -> TokenStream {
     let words = plan.repr.words();
     let value_expr = match plan.repr {
         Repr::Classes { classes, .. } => quote!(#p::key_value::<#words, #classes>(k)),
@@ -137,7 +151,7 @@ fn lookup(input: &MapInput, plan: &Plan, p: &TokenStream, ty: &TokenStream) -> T
     };
 
     let find = if plan.has_long {
-        quote!(SLOTS[slot].find_long(&v, k, &KEYS))
+        quote!(SLOTS[slot].find_long(&v, k, &#keys_name))
     } else {
         quote!(SLOTS[slot].find(&v, k.len()))
     };
@@ -152,7 +166,7 @@ fn lookup(input: &MapInput, plan: &Plan, p: &TokenStream, ty: &TokenStream) -> T
             let v = #value_expr;
             let slot = #slot_expr;
             match #find {
-                ::core::option::Option::Some(i) => ::core::option::Option::Some(&VALUES[i]),
+                ::core::option::Option::Some(i) => ::core::option::Option::Some(&#values_name[i]),
                 ::core::option::Option::None => ::core::option::Option::None,
             }
         }
