@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- AVX-512: in builds compiled with AVX-512BW and AVX-512VL (e.g. `-C target-cpu=native` on
+  Zen 4/5 or recent Intel), `get` and `get_in` read each key with one masked load that
+  touches only the key's bytes. On small maps that makes `get` 25-45% faster on hits
+  (HTTP headers 3.4 -> 1.9 ns) and up to 27% faster on misses. PtHash maps of 2 or 4
+  words keep the scalar path, where the vector-to-register moves on the hash's critical
+  path measured slower. Other builds are unchanged.
+
 ## 0.2.0
 
 - `get_in(buf, range)`: looks up the key at `buf[range]`, as `get(&buf[range])` would,

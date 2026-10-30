@@ -147,47 +147,22 @@ fn lookup(
             ::core::option::Option::None => ::core::option::Option::None,
         }
     };
-    // Near the end of the buffer (or for maps with keys over 32 bytes): `get`'s lookup on
-    // the bytes. No UTF-8 check is needed: invalid UTF-8 never equals a key.
-    let fallback = quote!(self.__pickmap_get_bytes(k));
-    let get_in_body = match &plan.pad {
-        None => fallback,
-        Some(pad) => {
-            let pw = pad.repr.words();
-            let load = 8 * pw;
-            let (pad_tables, pad_slot_stmts, pad_find) = table_parts(input, pad, p, keys_name);
-            quote! {
-                // One masked load of #load bytes from `buf`, when that stays inside it.
-                if buf.len() - start < #load {
-                    return #fallback;
-                }
-                #pad_tables
-                let v = #p::masked_in::<#pw>(buf, start, k.len());
-                #pad_slot_stmts
-                match #pad_find {
-                    ::core::option::Option::Some(i) => ::core::option::Option::Some(&#values_name[i]),
-                    ::core::option::Option::None => ::core::option::Option::None,
-                }
-            }
-        }
-    };
-
-    quote! {
-        // `get`'s body, always inlined: `get` stays a small wrapper, so callers can inline
-        // it as before, and `get_in`'s fallback gets its own copy rather than a call.
+    // `get`'s body, always inlined: `get` stays a small wrapper, so callers can inline it
+    // as before, and `get_in`'s fallback gets its own copy rather than a call.
+    let get_bytes = quote! {
         #[inline(always)]
+        #[allow(dead_code)]
         fn __pickmap_get_bytes(&self, k: &[::core::primitive::u8]) -> ::core::option::Option<&'static #ty> {
             #tables
             let v = #value_expr;
             #slot_stmts
             #some_value
         }
-
-        #[inline]
-        pub fn get(&self, key: &::core::primitive::str) -> ::core::option::Option<&'static #ty> {
-            self.__pickmap_get_bytes(key.as_bytes())
-        }
-
+    };
+    let get_doc = quote! {
+        /// The value for `key`, if the map has it.
+    };
+    let get_in_doc = quote! {
         /// The value for the key at `buf[range]`. The same answer as
         /// `get(&buf[range])`, but faster when `buf` continues past the key: the key is
         /// read with one wide load from `buf` and masked, without leaving `buf`.
@@ -195,16 +170,108 @@ fn lookup(
         /// # Panics
         ///
         /// If `range` is out of bounds for `buf`, like indexing.
-        #[inline]
+    };
+    let get_in_sig = quote! {
         pub fn get_in<B: ::core::convert::AsRef<[::core::primitive::u8]> + ?::core::marker::Sized>(
             &self,
             buf: &B,
             range: ::core::ops::Range<::core::primitive::usize>,
+        ) -> ::core::option::Option<&'static #ty>
+    };
+
+    let Some(pad) = &plan.pad else {
+        // Maps with keys over 32 bytes: no padded tables; `get_in` is `get` on the bytes.
+        // No UTF-8 check is needed there: invalid UTF-8 never equals a key.
+        return quote! {
+            #get_bytes
+
+            #get_doc
+            #[inline]
+            pub fn get(&self, key: &::core::primitive::str) -> ::core::option::Option<&'static #ty> {
+                self.__pickmap_get_bytes(key.as_bytes())
+            }
+
+            #get_in_doc
+            #[inline]
+            #get_in_sig {
+                let buf = buf.as_ref();
+                let ::core::ops::Range { start, end } = range;
+                self.__pickmap_get_bytes(&buf[start..end])
+            }
+        };
+    };
+
+    let pw = pad.repr.words();
+    let load = 8 * pw;
+    let (pad_tables, pad_slot_stmts, pad_find) = table_parts(input, pad, p, keys_name);
+    // Builds with AVX-512BW+VL read every key with one masked load straight from the key
+    // (`load::masked_key`), into the same zero-padded value `get_in`'s tables use. Not for
+    // PtHash maps of 2 or 4 words: their hash needs the vector's upper lanes, and moving
+    // those to general registers sits on the critical path (misses measured 15-25% slower).
+    let use_avx512 = !(pad.tagged() && pw >= 2);
+    let avx512 = if use_avx512 {
+        quote! {
+            all(target_arch = "x86_64", target_feature = "avx512bw", target_feature = "avx512vl", not(miri))
+        }
+    } else {
+        quote!(any())
+    };
+    quote! {
+        #get_bytes
+
+        // The lookup over zero-padded keys, shared by `get_in` and AVX-512 `get`.
+        #[inline(always)]
+        fn __pickmap_get_padded(
+            &self,
+            k: &[::core::primitive::u8],
+            v: [::core::primitive::u64; #pw],
         ) -> ::core::option::Option<&'static #ty> {
+            #pad_tables
+            #pad_slot_stmts
+            match #pad_find {
+                ::core::option::Option::Some(i) => ::core::option::Option::Some(&#values_name[i]),
+                ::core::option::Option::None => ::core::option::Option::None,
+            }
+        }
+
+        #get_doc
+        #[cfg(#avx512)]
+        #[inline]
+        pub fn get(&self, key: &::core::primitive::str) -> ::core::option::Option<&'static #ty> {
+            let k = key.as_bytes();
+            self.__pickmap_get_padded(k, #p::masked_key::<#pw>(k))
+        }
+
+        #get_doc
+        #[cfg(not(#avx512))]
+        #[inline]
+        pub fn get(&self, key: &::core::primitive::str) -> ::core::option::Option<&'static #ty> {
+            self.__pickmap_get_bytes(key.as_bytes())
+        }
+
+        #get_in_doc
+        #[cfg(#avx512)]
+        #[inline]
+        #get_in_sig {
             let buf = buf.as_ref();
             let ::core::ops::Range { start, end } = range;
             let k = &buf[start..end];
-            #get_in_body
+            self.__pickmap_get_padded(k, #p::masked_key::<#pw>(k))
+        }
+
+        #get_in_doc
+        #[cfg(not(#avx512))]
+        #[inline]
+        #get_in_sig {
+            let buf = buf.as_ref();
+            let ::core::ops::Range { start, end } = range;
+            let k = &buf[start..end];
+            // One wide load of #load bytes from `buf`, when that stays inside it; near the
+            // end, `get`'s lookup (invalid UTF-8 never equals a key, so no check is needed).
+            if buf.len() - start < #load {
+                return self.__pickmap_get_bytes(k);
+            }
+            self.__pickmap_get_padded(k, #p::masked_in::<#pw>(buf, start, k.len()))
         }
     }
 }

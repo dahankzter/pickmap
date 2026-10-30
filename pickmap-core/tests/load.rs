@@ -115,3 +115,20 @@ fn masked_in_matches_padded_value() {
     // Longer than the load: the first 8 * WORDS bytes, which the length check rejects.
     assert_eq!(masked_in::<1>(&buf, 0, 50), padded_value::<1>(&buf[..8]));
 }
+
+#[cfg(all(target_arch = "x86_64", target_feature = "avx512bw", target_feature = "avx512vl", not(miri)))]
+#[test]
+fn masked_key_matches_padded_value() {
+    use pickmap_core::load::{masked_key, padded_value};
+    let mut rng = SplitMix64(10);
+    for n in 0..=48 {
+        for _ in 0..50 {
+            // Exact-length allocations: the masked load must not need bytes past the key.
+            let k: Box<[u8]> = (0..n).map(|_| rng.next() as u8).collect();
+            assert_eq!(masked_key::<1>(&k), padded_value::<1>(&k[..n.min(8)]), "n {n}");
+            assert_eq!(masked_key::<2>(&k), padded_value::<2>(&k[..n.min(16)]), "n {n}");
+            assert_eq!(masked_key::<4>(&k), padded_value::<4>(&k[..n.min(32)]), "n {n}");
+        }
+    }
+    assert_eq!(masked_key::<2>(&[]), [0, 0]);
+}

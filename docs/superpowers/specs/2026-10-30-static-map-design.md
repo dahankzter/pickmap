@@ -30,7 +30,7 @@ Why: Rust has `phf`, `quickphf` and `frozen-collections`, but none of them are f
 - Very large maps (100k+ keys), for example Lemire's binary fuse `constmap` design.
 - More than one lookup method. Version 1 ships `get` only. The spike's branch-free variant, faster on unpredictable streams when the caller doesn't branch, is a later investigation, and no API names that describe branching are added before then.
 - Over-reading loads (Lemire's 16-byte read past the key, via inline asm), even as an opt-in feature.
-- AVX-512 masked loads or any other path that needs target-feature dispatch.
+- Runtime CPU-feature dispatch. (AVX-512 masked loads were added later, selected at compile time with `cfg(target_feature)`.)
 - Being a general collection of macros. This crate lives in `pickmap/` inside the local-only `macroz` folder, which will later hold other macro ideas.
 
 ## Anti-goals (would make this a failure even if it works)
@@ -46,7 +46,7 @@ Why: Rust has `phf`, `quickphf` and `frozen-collections`, but none of them are f
 - The runtime crate is `no_std` (no allocation, no std).
 - Targets: x86_64 and aarch64 get tuned paths. Every other target must compile and be correct using a portable fallback.
 - No SIMD and no runtime CPU detection. The only architecture-specific code is the optimization barrier (an empty `asm!` on x86_64 and aarch64). Other targets get a plain function, and they lose only the branch-free guarantee.
-- The only `unsafe` is that barrier: no raw-pointer loads, no unchecked indexing. Every `unsafe` block gets a `// SAFETY:` comment. The whole test suite also runs under Miri, with the barrier compiled out.
+- The only `unsafe` is that barrier, plus (since AVX-512 support) one masked-load intrinsic compiled only with AVX-512BW+VL, whose mask covers exactly the key's bytes: no other raw-pointer loads, no unchecked indexing. Every `unsafe` block gets a `// SAFETY:` comment. The whole test suite also runs under Miri, with the barrier compiled out.
 - Benchmark machine: this Linux box, an AMD Ryzen Threadripper PRO 9975WX (Zen 5). An Apple M4 Pro is available later for aarch64 numbers but isn't part of v1 work.
 
 ## API (decided)

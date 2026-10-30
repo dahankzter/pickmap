@@ -199,7 +199,13 @@ static MASKS: [[u64; 4]; 33] = {
 pub fn masked_in<const WORDS: usize>(buf: &[u8], start: usize, n: usize) -> [u64; WORDS] {
     let s = &buf[start..start + 8 * WORDS];
     let m = &MASKS[n.min(8 * WORDS)];
-    core::array::from_fn(|i| le_u64(s, 8 * i) & m[i])
+    // With AVX2 or newer, LLVM vectorizes the loads and masks, then moves the lanes back
+    // out on the hash's critical path; the barrier keeps each word scalar. Without AVX it
+    // doesn't, and the barrier would only cost.
+    #[cfg(target_feature = "avx2")]
+    return core::array::from_fn(|i| opaque(le_u64(s, 8 * i)) & m[i]);
+    #[cfg(not(target_feature = "avx2"))]
+    return core::array::from_fn(|i| le_u64(s, 8 * i) & m[i]);
 }
 
 /// `k` zero-padded to `8 * WORDS` bytes, as little-endian words. Build-time twin of
@@ -208,4 +214,37 @@ pub fn padded_value<const WORDS: usize>(k: &[u8]) -> [u64; WORDS] {
     let mut buf = [0u8; 32];
     buf[..k.len()].copy_from_slice(k);
     core::array::from_fn(|i| le_u64(&buf, 8 * i))
+}
+
+/// The key zero-padded to `8 * WORDS` bytes (its first `8 * WORDS` bytes if longer), in
+/// one AVX-512 masked load straight from the key. Equal to [`padded_value`] of
+/// `&k[..k.len().min(8 * WORDS)]` and to [`masked_in`], so maps use the same tables.
+///
+/// Only in builds compiled with AVX-512BW and AVX-512VL (e.g. `-C target-cpu=native` on
+/// Zen 4/5 or recent Intel).
+#[cfg(all(target_arch = "x86_64", target_feature = "avx512bw", target_feature = "avx512vl", not(miri)))]
+#[inline(always)]
+pub fn masked_key<const WORDS: usize>(k: &[u8]) -> [u64; WORDS] {
+    use core::arch::x86_64::{__m128i, __m256i, _mm_maskz_loadu_epi8, _mm256_maskz_loadu_epi8};
+    let n = k.len().min(8 * WORDS);
+    let p = k.as_ptr().cast::<i8>();
+    let mut out = [0u64; WORDS];
+    // SAFETY: a masked load reads only the bytes whose mask bit is set, and faults on
+    // none of the others. The mask covers exactly the first `n <= k.len()` bytes of `k`,
+    // which are in bounds; with `n == 0` nothing is read, so even an empty slice's
+    // dangling pointer is fine. The target features are guaranteed by the `cfg` above.
+    // The vectors are plain 16 or 32-byte values, read back as u64 lanes.
+    unsafe {
+        if WORDS <= 2 {
+            let v: __m128i = _mm_maskz_loadu_epi8(((1u32 << n) - 1) as u16, p);
+            let lanes: [u64; 2] = core::mem::transmute(v);
+            out.copy_from_slice(&lanes[..WORDS]);
+        } else {
+            let mask = if n == 32 { u32::MAX } else { (1u32 << n) - 1 };
+            let v: __m256i = _mm256_maskz_loadu_epi8(mask, p);
+            let lanes: [u64; 4] = core::mem::transmute(v);
+            out.copy_from_slice(&lanes[..WORDS]);
+        }
+    }
+    out
 }

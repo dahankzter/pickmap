@@ -134,6 +134,11 @@ random order every run, so the branch predictor can't memorize them:
 | 1,000 random words | 2.4 / 1.9 | 2.0 / 1.7 | 7.8 / 10.7 | 1.6 / 1.5 |
 | 500 paths with a shared prefix | 2.8 / 2.3 | 2.6 / 2.1 | 8.7 / 11.1 | 3.6 / 6.7 |
 
+With AVX-512 enabled (for example `RUSTFLAGS="-C target-cpu=native"` on AMD Zen 4/5 or a
+recent Intel server CPU), small maps' `get` reads each key with one masked load and gets
+much faster: HTTP headers 1.9 / 2.4 ns, HTTP methods 1.3 / 1.6 ns. The masked load reads
+only the key's own bytes, so it stays safe even at the end of memory.
+
 Lemire's library reads up to 16 bytes past the end of each key; pickmap never reads
 outside the input it is given. `get` therefore loads a key piece by piece, while
 `get_in` can do Lemire's single wide load safely, because the caller's buffer continues
@@ -171,6 +176,9 @@ unoptimized build, 3,000 keys take about 70 ms.
 
 - `no_std`, with no allocation; builds for bare-metal targets such as
   `thumbv7m-none-eabi`.
+- With AVX-512BW+VL enabled at compile time, small maps use a masked load per lookup;
+  other builds don't change. Detection is at compile time (`cfg(target_feature)`), never
+  at run time.
 - The optimization barrier is an `asm!` block on x86_64 and aarch64. Other targets,
   such as `wasm32`, get a plain function: lookups are still correct, only the
   no-misprediction guarantee needs the barrier.
@@ -179,11 +187,16 @@ unoptimized build, 3,000 keys take about 70 ms.
 
 ## Safety
 
-pickmap never reads outside the string you pass in. The only `unsafe` code is an empty
-`asm!` block, the technique constant-time cryptography uses, that hides a value from the
-optimizer so LLVM can't turn the branch-free compare back into branches. It emits no
-instructions and touches no memory. Under Miri it is compiled out, and the test suite
-runs clean there.
+pickmap never reads outside the string you pass in. It has two small `unsafe` blocks:
+
+- An empty `asm!` block, the technique constant-time cryptography uses, that hides a
+  value from the optimizer so LLVM can't turn the branch-free compare back into branches.
+  It emits no instructions and touches no memory.
+- In builds with AVX-512BW and AVX-512VL only: a masked load whose mask covers exactly
+  the key's bytes. Masked-off bytes are not accessed at all, so even an empty key or a key
+  at the end of memory is fine.
+
+Under Miri both are compiled out, and the test suite runs clean there.
 
 ## Minimum supported Rust version
 

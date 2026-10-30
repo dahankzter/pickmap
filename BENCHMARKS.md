@@ -32,6 +32,18 @@ taskset -c 4 target/release/report
   - 8-43% faster than `get` on hit-only and miss-only streams;
   - level with Lemire on `http_headers` (1.96 / 1.79 vs 1.86 / 1.77);
   - about the same as `get` on the 50/50 mix, where the hit/miss mispredict dominates.
+- **AVX-512** (`RUSTFLAGS="-C target-cpu=native"`, same machine). Small maps' `get` uses one masked load per key:
+
+  | set | default `get` hit / miss | AVX-512 `get` hit / miss |
+  |---|---|---|
+  | http_headers | 3.40 / 3.33 | 1.86 / 2.43 |
+  | url_schemes | 2.31 / 2.06 | 1.33 / 1.78 |
+  | http_methods | 1.98 / 1.81 | 1.31 / 1.62 |
+  | js_reserved | 2.42 / 2.24 | 1.49 / 1.90 |
+  | rust_keywords | 2.56 / 2.39 | 1.79 / 2.29 |
+  | tickers100 | 2.47 / 2.17 | 1.73 / 2.09 |
+
+  PtHash maps with 2- or 4-word values keep the scalar path and are unchanged. The tables below are from the default build; the full AVX-512 report is reproducible with the command above plus `RUSTFLAGS`.
 - **Branch misses.** `pickmap` takes 0.00 per lookup on hit-only and miss-only streams for every set whose keys are 32 bytes or shorter, including near-miss-heavy ones. `cargo test -p bench --release --test branch_misses` guards this on Linux.
 - **Keys over 32 bytes** (`long_paths`: 150 long URL paths sharing prefixes and suffixes, 50 short ones). Hashing and comparing keys of unbounded length depends on the input's length:
   - 0.28 branch misses per lookup on hits, 0.49 on misses;
