@@ -14,9 +14,9 @@ pub enum Strategy {
     PtHash { seed: u64, bucket_bits: u32, pilots: Vec<u32>, mask: u32 },
 }
 
-const STEP_BUDGET: usize = 200_000;
+const STEP_BUDGET: usize = 20_000;
 /// Across all picked-byte attempts, before falling back to PtHash.
-const TOTAL_STEP_BUDGET: usize = 1_000_000;
+const TOTAL_STEP_BUDGET: usize = 2_000_000;
 const MAX_POSITIONS: usize = 3;
 const PILOTS: u64 = 1 << 20;
 const SEEDS: u64 = 64;
