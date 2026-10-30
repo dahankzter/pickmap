@@ -16,8 +16,9 @@ use keysets::{QUERY_COUNT, SplitMix64, WORKLOADS, Workload};
 const SAMPLES: usize = 101;
 const SUSPICIOUS_NS: f64 = 0.3;
 
-const COMPETITORS: [&str; 8] = [
+const COMPETITORS: [&str; 9] = [
     "pickmap",
+    "pickmap-get-in",
     "pickmap-keyword-scan",
     "lemire-cpp",
     "quickphf",

@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use pickmap_core::hash::{h_long, h_value, hash_tag, picked_slot, pthash_slot};
 use pickmap_core::slot::{MAX_KEY_LEN, Slot, meta};
 
-use crate::repr::{Repr, repr_for, repr_for_hashing};
+use crate::repr::{Repr, repr_for, repr_for_hashing, words_of};
 use crate::search::{Strategy, search, slot_of, table_len};
 
 pub struct Plan {
@@ -15,6 +15,10 @@ pub struct Plan {
     pub slots: Vec<Option<u32>>,
     /// Whether any key is longer than 32 bytes (those are compared byte by byte).
     pub has_long: bool,
+    /// `get_in`'s own plan over zero-padded keys, read with one masked load from the
+    /// caller's buffer. `None` for maps with keys over 32 bytes, where `get_in` falls
+    /// back to `get`.
+    pub pad: Option<Box<Plan>>,
 }
 
 pub fn plan(keys: &[&str]) -> Result<Plan, String> {
@@ -34,13 +38,31 @@ pub fn plan(keys: &[&str]) -> Result<Plan, String> {
         strategy = search(&bytes, repr);
     }
     let strategy = strategy?;
+    let has_long = bytes.iter().any(|k| k.len() > 32);
+    let pad = if has_long || keys.is_empty() {
+        None
+    } else {
+        let max = bytes.iter().map(|k| k.len()).max().unwrap_or(0);
+        let pad_repr = Repr::Padded { words: words_of(max) };
+        // Picked bytes don't depend on the representation, so they carry over; PtHash
+        // hashes the value and needs a table of its own.
+        let pad_strategy = match &strategy {
+            Strategy::Picked { .. } => strategy.clone(),
+            Strategy::PtHash { .. } => search(&bytes, pad_repr)?,
+        };
+        Some(Box::new(plan_slots(&bytes, pad_repr, pad_strategy, false, None)))
+    };
+    Ok(plan_slots(&bytes, repr, strategy, has_long, pad))
+}
+
+fn plan_slots(bytes: &[&[u8]], repr: Repr, strategy: Strategy, has_long: bool, pad: Option<Box<Plan>>) -> Plan {
     let mut slots = vec![None; table_len(&strategy)];
     for (i, k) in bytes.iter().enumerate() {
         let s = slot_of(&strategy, repr, k);
         assert!(slots[s].is_none(), "search returned a colliding strategy");
         slots[s] = Some(i as u32);
     }
-    Ok(Plan { repr, strategy, slots, has_long: bytes.iter().any(|k| k.len() > 32) })
+    Plan { repr, strategy, slots, has_long, pad }
 }
 
 impl Plan {
@@ -77,7 +99,20 @@ impl Plan {
 
     /// What the emitted `get` returns for `key`, computed the same way.
     pub fn lookup(&self, keys: &[&str], key: &str) -> Option<usize> {
-        let k = key.as_bytes();
+        self.lookup_bytes(keys, key.as_bytes())
+    }
+
+    /// What the emitted `get_in` returns for `buf[range]`: the padded plan when a full
+    /// load fits before the end of `buf`, otherwise `get`.
+    pub fn lookup_in(&self, keys: &[&str], buf: &[u8], range: std::ops::Range<usize>) -> Option<usize> {
+        let k = &buf[range.clone()];
+        match &self.pad {
+            Some(pad) if buf.len() - range.start >= 8 * pad.repr.words() => pad.lookup_bytes(keys, k),
+            _ => std::str::from_utf8(k).ok().and_then(|s| self.lookup(keys, s)),
+        }
+    }
+
+    fn lookup_bytes(&self, keys: &[&str], k: &[u8]) -> Option<usize> {
         let v = self.repr.value(k);
         let (slot, input_meta) = self.slot_and_meta(k);
         // Build the slot exactly as the emitter does and ask core, like generated code.
@@ -192,6 +227,39 @@ mod tests {
                         assert_eq!(p.lookup(&keys, &q), r.get(q.as_str()).copied(), "seed {seed} {q:?}");
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn lookup_in_matches_hashmap() {
+        let mut sets = keysets::all();
+        // Long keys: get_in falls back to get.
+        sets.push(keysets::KeySet { name: "with_long", keys: vec!["a".into(), "b".repeat(40)] });
+        for set in sets {
+            let keys: Vec<&str> = set.keys.iter().map(String::as_str).collect();
+            let p = plan(&keys).expect("plan");
+            let r = reference(&keys);
+            let mut rng = SplitMix64(17);
+            // Tokens (hits and misses) laid out in one buffer with separators.
+            let mut buf = Vec::new();
+            let mut ranges = Vec::new();
+            for w in keysets::WORKLOADS {
+                for q in keysets::queries(&set, w).into_iter().take(500) {
+                    let start = buf.len();
+                    buf.extend_from_slice(q.as_bytes());
+                    ranges.push(start..buf.len());
+                    buf.extend((0..rng.below(3)).map(|_| b' '));
+                }
+            }
+            for range in ranges {
+                let want = std::str::from_utf8(&buf[range.clone()]).ok().and_then(|q| r.get(q).copied());
+                assert_eq!(p.lookup_in(&keys, &buf, range.clone()), want, "{} {range:?}", set.name);
+            }
+            // Ranges that end at the buffer's end take the fallback path.
+            for k in &keys {
+                let b = format!("xx{k}");
+                assert_eq!(p.lookup_in(&keys, b.as_bytes(), 2..b.len()), r.get(k).copied(), "{} {k:?}", set.name);
             }
         }
     }

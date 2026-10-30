@@ -64,13 +64,33 @@ static_map! { [attributes] [vis] NAME: ValueType; "key" => value, ... }
 - **Values** are any expression valid in a `static` of `ValueType`, which must be
   `Sync`. Elided lifetimes are allowed (`&[u8]`, `Cow<'_, str>`), since a static's
   references are `'static` anyway.
-- **Methods:** `get(&str) -> Option<&'static ValueType>`, `contains_key`, `len`,
-  `is_empty`, and `iter()` in declaration order.
+- **Methods:** `get(&str) -> Option<&'static ValueType>`, `get_in(buf, range)` for
+  keys inside a larger buffer, `contains_key`, `len`, `is_empty`, and `iter()` in
+  declaration order.
 - **Generic code:** each map has its own generated type implementing
   [`pickmap::StaticMap`](https://docs.rs/pickmap/latest/pickmap/trait.StaticMap.html),
   so functions can take `&impl StaticMap<Value = V>`.
 - **Attributes:** `///` docs and other attributes apply to the static.
   `#[cfg(...)]` and `#[cfg_attr(...)]` apply to everything the macro generates.
+
+## Looking up tokens inside a buffer: `get_in`
+
+If the string you look up is a slice of a bigger buffer, as in a lexer, a parser or a
+protocol decoder, pass the buffer and the range instead:
+
+```rust
+// METHODS as in the example above.
+let request = b"POST /upload HTTP/1.1\r\nHost: example.com\r\n";
+assert_eq!(METHODS.get_in(request, 0..4), Some(&Method::Post));
+```
+
+`get_in(buf, range)` returns the same answer as `get(&buf[range])`, but reads the key with
+one wide load from `buf` and masks off the bytes after it. That is the same trick that
+makes Lemire's C++ library fast, except that every byte read is inside `buf`, so no
+`unsafe` is involved. In the benchmarks it is 8-43% faster than `get` on hit-only and
+miss-only streams, and level with Lemire on HTTP headers. Within 32 bytes of the end of
+`buf` it falls back to `get`'s lookup. `buf` can be a `&str`, `&[u8]`, `Vec<u8>` or
+anything else that is `AsRef<[u8]>`.
 
 ## Workloads
 
@@ -106,16 +126,18 @@ hint, because their default compare is already as fast. When unsure, keep the de
 Nanoseconds per lookup on an AMD Zen 5 (Threadripper PRO 9975WX), queries in a fresh
 random order every run, so the branch predictor can't memorize them:
 
-| key set | pickmap hit / miss | best of phf, frozen-collections, quickphf | Lemire's C++ |
-|---|---|---|---|
-| 9 HTTP methods | 2.0 / 1.8 | 9.0 / 9.5 | 1.1 / 0.9 |
-| 56 HTTP headers | 3.4 / 3.3 | 10.1 / 11.6 | 1.8 / 1.8 |
-| 53 Rust keywords | 2.6 / 2.4 | 4.0 / 4.1 | 1.7 / 1.7 |
-| 1,000 random words | 2.4 / 1.9 | 7.8 / 10.7 | 1.6 / 1.4 |
-| 500 paths with a shared prefix | 2.9 / 2.3 | 8.7 / 11.1 | 3.7 / 6.7 |
+| key set | `get` hit / miss | `get_in` hit / miss | best of phf, frozen-collections, quickphf | Lemire's C++ |
+|---|---|---|---|---|
+| 9 HTTP methods | 2.0 / 1.8 | 1.4 / 1.3 | 9.0 / 9.5 | 1.0 / 0.8 |
+| 56 HTTP headers | 3.4 / 3.3 | 2.0 / 1.8 | 10.1 / 11.6 | 1.9 / 1.8 |
+| 53 Rust keywords | 2.5 / 2.3 | 1.9 / 1.8 | 4.0 / 4.1 | 1.7 / 1.7 |
+| 1,000 random words | 2.4 / 1.9 | 2.0 / 1.7 | 7.8 / 10.7 | 1.6 / 1.5 |
+| 500 paths with a shared prefix | 2.8 / 2.3 | 2.6 / 2.1 | 8.7 / 11.1 | 3.6 / 6.7 |
 
-Lemire's library reads up to 16 bytes past the end of each key, which pickmap
-deliberately never does; that is most of the remaining gap. Full tables, branch-miss
+Lemire's library reads up to 16 bytes past the end of each key; pickmap never reads
+outside the input it is given. `get` therefore loads a key piece by piece, while
+`get_in` can do Lemire's single wide load safely, because the caller's buffer continues
+past the key. Full tables, branch-miss
 counts and how to reproduce them are in
 [BENCHMARKS.md](https://github.com/dahankzter/pickmap/blob/main/BENCHMARKS.md).
 

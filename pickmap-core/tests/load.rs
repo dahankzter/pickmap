@@ -89,3 +89,29 @@ fn classes_for_counts() {
     assert_eq!(classes_for([2, 5, 9, 20].into_iter()), (15, 11));
     assert_eq!(classes_for([4, 12].into_iter()), (MID | BIG, 4));
 }
+
+#[test]
+fn masked_in_matches_padded_value() {
+    use pickmap_core::load::{masked_in, padded_value};
+    let mut rng = SplitMix64(9);
+    let buf: Vec<u8> = (0..200).map(|_| rng.next() as u8).collect();
+    for start in [0, 1, 7, 100, 200 - 32] {
+        for n in 0..=32 {
+            if start + n > buf.len() {
+                continue;
+            }
+            let k = &buf[start..start + n];
+            if start + 32 <= buf.len() {
+                assert_eq!(masked_in::<4>(&buf, start, n), padded_value::<4>(k), "start {start} n {n}");
+            }
+            if n <= 16 && start + 16 <= buf.len() {
+                assert_eq!(masked_in::<2>(&buf, start, n), padded_value::<2>(k), "start {start} n {n}");
+            }
+            if n <= 8 && start + 8 <= buf.len() {
+                assert_eq!(masked_in::<1>(&buf, start, n), padded_value::<1>(k), "start {start} n {n}");
+            }
+        }
+    }
+    // Longer than the load: the first 8 * WORDS bytes, which the length check rejects.
+    assert_eq!(masked_in::<1>(&buf, 0, 50), padded_value::<1>(&buf[..8]));
+}

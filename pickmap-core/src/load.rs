@@ -167,3 +167,45 @@ pub fn split_value_with<const WORDS: usize>(k: &[u8], c: usize, short: u8) -> [u
     v[0] |= key_value_with::<1>(k, short & (SMALL | MID))[0];
     v
 }
+
+/// `MASKS[n][i]` keeps the bytes of word `i` that lie inside an `n`-byte key.
+static MASKS: [[u64; 4]; 33] = {
+    let mut m = [[0u64; 4]; 33];
+    let mut n = 0;
+    while n <= 32 {
+        let mut i = 0;
+        while i < 4 {
+            let bytes = if n >= (i + 1) * 8 {
+                8
+            } else if n > i * 8 {
+                n - i * 8
+            } else {
+                0
+            };
+            m[n][i] = if bytes == 8 { u64::MAX } else { (1u64 << (bytes * 8)) - 1 };
+            i += 1;
+        }
+        n += 1;
+    }
+    m
+};
+
+/// The `n`-byte key at `buf[start..]`, zero-padded to `8 * WORDS` bytes: one wide load
+/// from `buf`, masked to the key. This is Lemire's over-read, done safely: the caller
+/// guarantees `start + 8 * WORDS <= buf.len()`, so every byte read is inside `buf`.
+/// For `n > 8 * WORDS` the value is the first `8 * WORDS` bytes; callers reject such
+/// inputs by length.
+#[inline(always)]
+pub fn masked_in<const WORDS: usize>(buf: &[u8], start: usize, n: usize) -> [u64; WORDS] {
+    let s = &buf[start..start + 8 * WORDS];
+    let m = &MASKS[n.min(8 * WORDS)];
+    core::array::from_fn(|i| le_u64(s, 8 * i) & m[i])
+}
+
+/// `k` zero-padded to `8 * WORDS` bytes, as little-endian words. Build-time twin of
+/// [`masked_in`]; only for `k.len() <= 8 * WORDS`.
+pub fn padded_value<const WORDS: usize>(k: &[u8]) -> [u64; WORDS] {
+    let mut buf = [0u8; 32];
+    buf[..k.len()].copy_from_slice(k);
+    core::array::from_fn(|i| le_u64(&buf, 8 * i))
+}

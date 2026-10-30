@@ -36,3 +36,20 @@ fn shuffled_is_a_permutation() {
     assert_eq!(x, y);
     assert!(s.strs.iter().zip(&s.ptrs).zip(&s.lens).all(|((q, &p), &l)| q.as_ptr() == p && q.len() == l));
 }
+
+/// Whole batches: every query sits inside one long buffer, so `get_in` takes its fast
+/// path (one-query batches above only reach its fallback).
+#[test]
+fn all_competitors_agree_on_whole_batches() {
+    let cases = cases();
+    for set in keysets::all() {
+        let reference = cases.iter().find(|c| c.set == set.name && c.competitor == "hashmap-foldhash").unwrap();
+        for w in WORKLOADS {
+            let b = batch(&set, w);
+            let want = (reference.tput)(&b);
+            for c in cases.iter().filter(|c| c.set == set.name) {
+                assert_eq!((c.tput)(&b), want, "{} {} {w:?}", c.set, c.competitor);
+            }
+        }
+    }
+}

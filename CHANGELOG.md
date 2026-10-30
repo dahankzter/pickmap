@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `get_in(buf, range)`: looks up the key at `buf[range]`, as `get(&buf[range])` would,
+  but reads it with one wide load from `buf` masked to the key's length, which is safe
+  because every byte read is inside `buf`. 8-43% faster than `get` on hit-only and
+  miss-only lookups in the benchmarks; level with Lemire's C++ on HTTP headers. Also on
+  the `StaticMap` trait, with a default that calls `get`.
+- Maps generate `get_in`'s tables inside `get_in` itself, so programs that don't call it
+  don't carry them.
+
 ## 0.1.0
 
 First release.

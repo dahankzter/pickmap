@@ -1,6 +1,6 @@
 //! Per-set choice of how keys become words.
 
-use pickmap_core::load::{MID, SMALL, classes_for, key_value_with, signature_with, split_value_with};
+use pickmap_core::load::{MID, SMALL, classes_for, key_value_with, padded_value, signature_with, split_value_with};
 
 /// How a map turns keys (and inputs) into `words` u64s: 1, 2 or 4 (8, 16 or 32 bytes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11,12 +11,18 @@ pub enum Repr {
     Sig { w: usize, c: usize, words: usize },
     /// `load::split_value`: `c` 8-byte words from 8 bytes on, the `short` classes below.
     Split { c: usize, words: usize, short: u8 },
+    /// The key zero-padded to `8 * words` bytes, as `get_in`'s masked load reads it
+    /// (`load::masked_in`). Only used for `get_in`'s tables, never chosen for `get`.
+    Padded { words: usize },
 }
 
 impl Repr {
     pub fn words(self) -> usize {
         match self {
-            Repr::Classes { words, .. } | Repr::Sig { words, .. } | Repr::Split { words, .. } => words,
+            Repr::Classes { words, .. }
+            | Repr::Sig { words, .. }
+            | Repr::Split { words, .. }
+            | Repr::Padded { words } => words,
         }
     }
 
@@ -28,6 +34,8 @@ impl Repr {
                     Repr::Classes { classes, .. } => key_value_with::<$words>(k, classes).to_vec(),
                     Repr::Sig { w, c, .. } => signature_with::<$words>(k, w, c).to_vec(),
                     Repr::Split { c, short, .. } => split_value_with::<$words>(k, c, short).to_vec(),
+                    // Inputs longer than the load keep its first 8 * words bytes.
+                    Repr::Padded { .. } => padded_value::<$words>(&k[..k.len().min(8 * $words)]).to_vec(),
                 }
             };
         }
@@ -40,7 +48,7 @@ impl Repr {
 }
 
 /// The fewest words (1, 2 or 4) that hold `bytes` bytes.
-fn words_of(bytes: usize) -> usize {
+pub(crate) fn words_of(bytes: usize) -> usize {
     match bytes {
         0..=8 => 1,
         9..=16 => 2,

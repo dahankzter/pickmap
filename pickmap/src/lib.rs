@@ -31,6 +31,20 @@
 //! assert_eq!(count(&METHODS), 4);
 //! ```
 //!
+//! # Tokens inside a buffer
+//!
+//! When the key is a slice of a larger buffer (a lexer's source, a request being
+//! parsed), `get_in(buf, range)` gives the same answer as `get(&buf[range])` but reads
+//! the key with one wide load from `buf`, masked to its length, never leaving `buf`:
+//!
+//! ```
+//! # use pickmap::static_map;
+//! # #[derive(Debug, PartialEq)] pub enum Method { Get, Post }
+//! # static_map! { pub METHODS: Method; "GET" => Method::Get, "POST" => Method::Post }
+//! let request = b"POST /upload HTTP/1.1\r\nHost: example.com\r\n";
+//! assert_eq!(METHODS.get_in(request, 0..4), Some(&Method::Post));
+//! ```
+//!
 //! # Syntax
 //!
 //! ```text
@@ -63,6 +77,18 @@ pub trait StaticMap: Sync + 'static {
 
     /// The value for `key`, if the map has it.
     fn get(&self, key: &str) -> Option<&'static Self::Value>;
+
+    /// The value for the key at `buf[range]`: the same answer as `get(&buf[range])`, but
+    /// faster when `buf` continues past the key, as in a lexer or parser looking up a
+    /// token inside its input. The key is read with one wide load from `buf` and masked,
+    /// never leaving `buf`.
+    ///
+    /// # Panics
+    ///
+    /// If `range` is out of bounds for `buf`, like indexing.
+    fn get_in<B: AsRef<[u8]> + ?Sized>(&self, buf: &B, range: core::ops::Range<usize>) -> Option<&'static Self::Value> {
+        core::str::from_utf8(&buf.as_ref()[range]).ok().and_then(|s| self.get(s))
+    }
 
     fn contains_key(&self, key: &str) -> bool {
         self.get(key).is_some()

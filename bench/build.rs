@@ -73,6 +73,11 @@ fn emit_set(out: &mut String, name: &str, keys: &[String]) {
     }
     writeln!(out, "    }}").unwrap();
     writeln!(out, "    #[inline]\n    pub fn pick_get(k: &str) -> Option<u32> {{ PICK.get(k).copied() }}").unwrap();
+    writeln!(
+        out,
+        "    #[inline]\n    pub fn pick_in_get(buf: &[u8], r: std::ops::Range<usize>) -> Option<u32> {{ PICK.get_in(buf, r).copied() }}"
+    )
+    .unwrap();
 
     // The same map declared for a keyword-scan workload.
     writeln!(out, "    pickmap::static_map! {{\n        #[pickmap(workload = \"keyword_scan\")]\n        pub PICK_KW: u32;").unwrap();

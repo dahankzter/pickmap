@@ -258,3 +258,41 @@ fn fn_pointer_values_keep_their_lifetimes() {
     // Callable with a non-'static string: the signature was not rewritten.
     assert_eq!(HANDLERS.get("len").map(|f| f(&local)), Some(4));
 }
+
+fn find_in<'a>(src: &'a str, word: &str) -> std::ops::Range<usize> {
+    let start = src.find(word).expect("word in source");
+    start..start + word.len()
+}
+
+#[test]
+fn get_in_finds_tokens_inside_a_buffer() {
+    let src = "GET /index.html HTTP/1.1 then POST, DELETE, PATCHX and finally get";
+    assert_eq!(METHODS.get_in(src, find_in(src, "GET")), Some(&Method::Get));
+    assert_eq!(METHODS.get_in(src, find_in(src, "POST")), Some(&Method::Post));
+    assert_eq!(METHODS.get_in(src, find_in(src, "DELETE")), Some(&Method::Delete));
+    assert_eq!(METHODS.get_in(src, find_in(src, "PATCHX")), None);
+    // A prefix of a longer word is its own (missing) key.
+    assert_eq!(METHODS.get_in(src, find_in(src, "PATC")), None);
+    // The last token sits at the very end: the fallback path.
+    assert_eq!(METHODS.get_in(src, find_in(src, "get")), None);
+    assert_eq!(METHODS.get_in("xxPUT", 2..5), Some(&Method::Put));
+    // Byte buffers work too.
+    let bytes: &[u8] = b"..DELETE....................................";
+    assert_eq!(METHODS.get_in(bytes, 2..8), Some(&Method::Delete));
+    // Not on a char boundary: no key matches a broken UTF-8 sequence.
+    let accented = "é GET é GET é";
+    assert_eq!(METHODS.get_in(accented, 1..2), None);
+    // Every entry of a bigger map, found inside a padded buffer.
+    for (k, v) in LONG.iter() {
+        let buf = format!("<{k}>{}", " ".repeat(40));
+        assert_eq!(LONG.get_in(&buf, 1..1 + k.len()), Some(v), "{k:?}");
+    }
+    assert_eq!(E.get_in("abc", 0..3), None);
+    assert_eq!(StaticMap::get_in(&METHODS, src, find_in(src, "POST")), Some(&Method::Post));
+}
+
+#[test]
+#[should_panic]
+fn get_in_panics_on_out_of_bounds_range() {
+    let _ = METHODS.get_in("GET", 0..10);
+}

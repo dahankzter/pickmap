@@ -41,20 +41,22 @@ fn pickmap_has_no_data_dependent_branches() {
     let mut failures = Vec::new();
     for set in keysets::all() {
         let enforced = set.keys.iter().all(|k| k.len() <= 32);
-        let case = cases.iter().find(|c| c.set == set.name && c.competitor == "pickmap").expect("pickmap case");
-        for w in [Workload::Hit, Workload::Miss] {
-            let base = batch(&set, w);
-            let (warm, timed) = (base.shuffled(&mut rng), base.shuffled(&mut rng));
-            std::hint::black_box((case.tput)(&warm));
-            counter.reset().unwrap();
-            counter.enable().unwrap();
-            std::hint::black_box((case.tput)(&timed));
-            counter.disable().unwrap();
-            let per = counter.read().unwrap() as f64 / timed.strs.len() as f64;
-            let note = if enforced { "" } else { " (not enforced: keys over 32 bytes)" };
-            println!("{} {w:?}: {per:.3} branch misses per lookup{note}", set.name);
-            if enforced && per > MAX_MISSES_PER_LOOKUP {
-                failures.push(format!("{} {w:?}: {per:.3}", set.name));
+        for competitor in ["pickmap", "pickmap-get-in"] {
+            let case = cases.iter().find(|c| c.set == set.name && c.competitor == competitor).expect("pickmap case");
+            for w in [Workload::Hit, Workload::Miss] {
+                let base = batch(&set, w);
+                let (warm, timed) = (base.shuffled(&mut rng), base.shuffled(&mut rng));
+                std::hint::black_box((case.tput)(&warm));
+                counter.reset().unwrap();
+                counter.enable().unwrap();
+                std::hint::black_box((case.tput)(&timed));
+                counter.disable().unwrap();
+                let per = counter.read().unwrap() as f64 / timed.strs.len() as f64;
+                let note = if enforced { "" } else { " (not enforced: keys over 32 bytes)" };
+                println!("{} {competitor} {w:?}: {per:.3} branch misses per lookup{note}", set.name);
+                if enforced && per > MAX_MISSES_PER_LOOKUP {
+                    failures.push(format!("{} {competitor} {w:?}: {per:.3}", set.name));
+                }
             }
         }
     }
