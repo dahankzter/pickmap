@@ -1,7 +1,11 @@
 //! Table slots and the single combined compare.
 
 /// One table entry: the key's value (see [`crate::load`]), its length, and its index in
-/// declaration order. Empty slots have `len == u32::MAX`, which no input matches.
+/// declaration order. Empty slots have `len == u32::MAX`; input lengths are clamped below
+/// that, so no input matches an empty slot. Keys are shorter than [`MAX_KEY_LEN`].
+/// Longest supported key, in bytes.
+pub const MAX_KEY_LEN: usize = u32::MAX as usize - 2;
+
 #[repr(C)]
 pub struct Slot<const WORDS: usize> {
     pub key: [u64; WORDS],
@@ -16,6 +20,8 @@ impl<const WORDS: usize> Slot<WORDS> {
     /// compared in one combined expression, so neither becomes a separate branch.
     #[inline(always)]
     pub fn find(&self, v: &[u64; WORDS], n: usize) -> Option<usize> {
+        // Clamped (branch-free) so even a 4 GiB input can't carry the empty-slot length.
+        let n = n.min(MAX_KEY_LEN + 1);
         let mut diff = self.len as u64 ^ n as u64;
         for i in 0..WORDS {
             diff |= self.key[i] ^ v[i];

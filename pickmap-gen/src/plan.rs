@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 
 use pickmap_core::hash::{h_long, h_value, picked_slot, pthash_slot};
+use pickmap_core::slot::{MAX_KEY_LEN, Slot};
 
 use crate::repr::{Repr, repr_for};
 use crate::search::{Strategy, search, slot_of, table_len};
@@ -20,6 +21,9 @@ pub fn plan(keys: &[&str]) -> Result<Plan, String> {
     let mut seen = HashSet::new();
     if let Some(dup) = keys.iter().find(|k| !seen.insert(**k)) {
         return Err(format!("duplicate key {dup:?}"));
+    }
+    if let Some(k) = keys.iter().find(|k| k.len() > MAX_KEY_LEN) {
+        return Err(format!("key of {} bytes is longer than the supported {MAX_KEY_LEN}", k.len()));
     }
     let bytes: Vec<&[u8]> = keys.iter().map(|k| k.as_bytes()).collect();
     let repr = repr_for(&bytes);
@@ -54,14 +58,25 @@ impl Plan {
                 pthash_slot(h, *bucket_bits, pilots, *mask)
             }
         };
-        let i = self.slots[slot]? as usize;
-        let stored = keys[i].as_bytes();
-        let hit = if self.has_long && n > 32 {
-            stored == k
-        } else {
-            stored.len() == n && self.repr.value(stored) == v
-        };
-        hit.then_some(i)
+        // Build the slot exactly as the emitter does and ask core, like generated code.
+        macro_rules! find {
+            ($words:literal) => {{
+                let slot = match self.slots[slot] {
+                    None => Slot::<$words>::EMPTY,
+                    Some(i) => {
+                        let stored = keys[i as usize].as_bytes();
+                        Slot { key: self.repr.value(stored).try_into().unwrap(), len: stored.len() as u32, idx: i }
+                    }
+                };
+                let v: [u64; $words] = v.clone().try_into().unwrap();
+                if self.has_long { slot.find_long(&v, k, keys) } else { slot.find(&v, n) }
+            }};
+        }
+        match self.repr.words() {
+            1 => find!(1),
+            2 => find!(2),
+            _ => find!(4),
+        }
     }
 }
 

@@ -27,3 +27,10 @@ fn find_long_compares_bytes() {
     assert_eq!(s.find_long(&[0; 4], y.as_bytes(), &keys), Some(1));
     assert_eq!(s.find_long(&[0; 4], x.as_bytes(), &keys), None);
 }
+
+#[test]
+fn empty_rejects_u32_max_length() {
+    // An input of exactly u32::MAX bytes must not look like an empty slot.
+    assert_eq!(Slot::<1>::EMPTY.find(&[0], u32::MAX as usize), None);
+    assert_eq!(Slot::<2>::EMPTY.find(&[0, 0], u32::MAX as usize), None);
+}
