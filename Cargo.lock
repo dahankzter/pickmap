@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "keysets"
 version = "0.0.0"
+
+[[package]]
+name = "pickmap-core"
+version = "0.1.0"
+dependencies = [
+ "keysets",
+]
