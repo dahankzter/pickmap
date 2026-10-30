@@ -1,7 +1,7 @@
 # Static string map: design
 
 Date: 2026-10-30
-Status: draft for review
+Status: approved; updated 2026-10-30 with phase 0 spike results (see `docs/spike-results.md` on branch `spike/round3`)
 
 ## Intent
 
@@ -28,6 +28,9 @@ Why: Rust has `phf`, `quickphf` and `frozen-collections`, but none of them are f
 - Inferring the value type.
 - Runtime "freeze" (building an optimized map from data at startup).
 - Very large maps (100k+ keys), for example Lemire's binary fuse `constmap` design.
+- More than one lookup method. Version 1 ships `get` only. The spike's branch-free variant, faster on unpredictable streams when the caller doesn't branch, is a later investigation, and no API names that describe branching are added before then.
+- Over-reading loads (Lemire's 16-byte read past the key, via inline asm), even as an opt-in feature.
+- AVX-512 masked loads or any other path that needs target-feature dispatch.
 - Being a general collection of macros. This crate lives in `pickmap/` inside the local-only `macroz` folder, which will later hold other macro ideas.
 
 ## Anti-goals (would make this a failure even if it works)
@@ -42,8 +45,8 @@ Why: Rust has `phf`, `quickphf` and `frozen-collections`, but none of them are f
 - Stable Rust only. Developed on 1.99.1. Set the minimum supported version (MSRV) before publishing, and avoid very new features unless they pay off clearly.
 - The runtime crate is `no_std` (no allocation, no std).
 - Targets: x86_64 and aarch64 get tuned paths. Every other target must compile and be correct using a portable fallback.
-- Architecture code is chosen at compile time (`cfg(target_feature)` / `cfg(target_arch)`). No runtime CPU detection. SSE2 (always on for x86_64) and NEON (always on for aarch64) are the baselines. AVX2 and AVX-512 are out of scope.
-- `unsafe` is allowed only where it's needed (unaligned loads, intrinsics). Keep it small, comment every block with its safety argument, and run the portable path under Miri.
+- No SIMD and no runtime CPU detection. The only architecture-specific code is the optimization barrier (an empty `asm!` on x86_64 and aarch64). Other targets get a plain function, and they lose only the branch-free guarantee.
+- The only `unsafe` is that barrier: no raw-pointer loads, no unchecked indexing. Every `unsafe` block gets a `// SAFETY:` comment. The whole test suite also runs under Miri, with the barrier compiled out.
 - Benchmark machine: this Linux box, an AMD Ryzen Threadripper PRO 9975WX (Zen 5). An Apple M4 Pro is available later for aarch64 numbers but isn't part of v1 work.
 
 ## API (decided)
@@ -93,47 +96,70 @@ Inherent methods with the same names exist on the generated type too, so callers
 
 Generic code uses the trait as a bound (`fn f(m: &impl StaticMap<Value = Method>)`). Trait objects (`&dyn StaticMap`) are not required in v1 (my call), so `iter` may return `impl Iterator` and the table layout stays free to choose by benchmark.
 
-## How it works (decided at the level of ideas)
+## How it works (decided; validated by the phase 0 spike)
+
+The spike (`spike/round3`, `docs/spike-results.md` there) measured every choice below. Numbers in this section come from it.
 
 ### Crate layout
 
-Three crates in one Cargo workspace:
+Three crates in one Cargo workspace, plus the kept benchmark crates:
 
-1. **Generator** (plain library, no proc-macro dependency). Takes a list of keys, analyzes them, picks a strategy, and produces a description of tables and parameters, then emits Rust tokens. Testable as ordinary code. Later it can be reused from `build.rs` and as the basis for runtime freeze.
+1. **Generator** (plain library, no proc-macro dependency). Takes the keys, picks a key representation and a hash strategy, builds the tables, and emits Rust tokens. Testable as ordinary code. Later it can be reused from `build.rs` and as the basis for runtime freeze.
 2. **Proc macro** (thin). Parses the macro input, calls the generator, and reports errors with good spans.
-3. **Runtime** (`no_std`, tiny). The `StaticMap` trait, the shared compare and load helpers (including the arch-specific code), and a re-export of the macro. This is the crate users depend on.
+3. **Runtime** (`no_std`, tiny). The `StaticMap` trait, the shared load, hash and compare helpers that generated code calls, and a re-export of the macro. This is the crate users depend on.
+4. **`keysets` and `bench`**: carried over from the spike, with the spike-only crate dropped. `bench` gains a `pickmap` competitor that uses the real macro.
 
-### Strategy selection at build time
+### Key representation (chosen per set at build time)
 
-The generator checks strategies in order of expected speed and uses the first one that works for the key set. The order and thresholds below are starting points; benchmarks set the final values.
+Every key, and every input, is turned into a fixed-size value of 1, 2 or 4 `u64` words (8, 16 or 32 bytes): the fewest words that hold the set's longest key. Two keys of the same length are equal exactly when their values are, so a lookup compares one value instead of bytes. Computing it must be **branch-free and never read outside the input**. The spike's way, which the builder keeps unless a benchmark beats it:
 
-1. **Tiny set:** a few keys (threshold set by benchmark) are compared directly. A length check rules out most misses for free.
-2. **Length only:** if every key has a different length, the length alone is the slot.
-3. **Picked bytes (Lemire/gperf style):** `slot = (len + asso[key[p1]] + asso[key[p2]] ...) & mask`, with one to three byte positions and a 256-entry association table. Positions may count from the start or from the end of the key, since many key sets differ only near the end. Unlike Lemire's C++, which is limited by `constexpr` to a greedy search, the generator runs native code and can **backtrack**: try different position sets, retry `asso` assignments, and grow the table size, within a time budget.
-4. **Fallback hash:** for key sets where picked bytes don't work, a fast multiply-based hash over 8-byte chunks of the key, with a seed found by search so the result is collision-free (perfect).
+- **Length classes.** 1-3 bytes use the first, middle and last byte. 4-7 bytes use two overlapping 4-byte words. 8-16 bytes use two overlapping 8-byte words. 17-32 bytes use four words covering the first and last 16 bytes. Each class reads from the input when the input is long enough for it, and from a static zero buffer otherwise, so every load is in bounds. The class is then picked with branch-free selects. Only the classes the set's key lengths need are emitted.
+- **Word signature.** `C` words of `W` bytes at offsets `min(i*W, len-W)`, where `W` is the largest power of two that fits in the shortest key. Inputs shorter than `W` read the zero buffer instead.
+- The generator emits whichever needs fewer loads. In the spike, the signature won for methods, keywords and 1,000 random words, and classes won for headers (keys of 2-28 bytes).
+- Inputs of a length no key has still get a value; the length check rejects them.
+- **Keys longer than 32 bytes** are supported through a slice compare against the stored key. Only sets that contain such keys pay for that path.
 
-Table size is a power of two so the reduction is a mask. Empty slots are allowed (non-minimal), which keeps search fast and helps reject misses. Keep memory reasonable: no huge sparse tables for small sets (builder sets the limit).
+### Hash strategy (chosen per set at build time)
 
-### Lookup
+1. **Picked bytes (Lemire/gperf style):** `slot = (len + asso_1[key[p1]] + ... ) & mask`, with 0 to 3 byte positions counted from the start or the end (clamped onto the key, branch-free; 0 positions is "length only"). There is **one 256-entry association table per position**, so byte order matters. A depth-first search with backtracking assigns the table values, trying table sizes from `next_power_of_two(n)` up to 8x that. It wins for small and medium sets (the spike's methods, headers and keywords).
+2. **PtHash fallback** for sets where picked bytes fail within budget (the spike's 1,000 random words):
+   - one folded 64x64-to-128-bit multiply over the key value and length;
+   - buckets taken from the top hash bits, with a power-of-two count of about `n/2`;
+   - per-bucket pilots stored pre-mixed (`(pilot * C) as u32`), so the slot is `(h as u32 ^ pilot) & mask`;
+   - the table is `next_power_of_two(n)` slots (load factor up to about 1), doubled only if the pilot search fails.
 
-1. Compute the slot from the strategy above. This must never read outside the input key: positions past the end of a short key need a safe answer (clamp, mask, or limit positions to the shortest key length; builder's call).
-2. Check the stored key at that slot: compare length first, then bytes.
-3. On a match, return the value at the same index.
+   That keeps 1,000 keys in about 1,024 slots, which fit in L1.
 
-The byte compare is where most speed comes from:
+Empty slots carry a length no input can have.
 
-- Stored keys are kept zero-padded in fixed-width slots (for example 16 bytes) for keys up to that width.
-- The input is loaded **without reading past its end**: overlapping unaligned loads by length class (for example two possibly overlapping 8-byte loads for lengths 8 to 16, two 4-byte loads for 4 to 7), or a copy into a padded buffer. Pick whatever benchmarks fastest and safe.
-- Then one compare (SSE2 or NEON for 16 bytes, or two `u64` compares). Benchmark whether SIMD actually beats scalar `u64` compares here; use it only if it does.
-- Keys longer than the fixed width use an ordinary slice compare after the hash and length checks.
+### Table layout and lookup
+
+- Each slot holds the key value (`[u64; WORDS]`), the key length (`u32`) and the value's index (`u32`). Values live in a `static VALUES: [V; N]` in declaration order, which also serves `iter`.
+- `get(key)`:
+  1. compute the key value;
+  2. compute the slot;
+  3. compare length and every key word in **one** combined comparison: `(len ^ n) | (key_0 ^ v_0) | ...` equals 0;
+  4. on a match, return `Some(&VALUES[index])`.
+
+  Everything before the final hit/miss branch must be free of data-dependent branches.
+- **LLVM re-creates branches** unless prevented. The spike found four ways it does this, all despite `core::hint::select_unpredictable`:
+  - it turns a select that involves a memory load into a branch;
+  - it branches around work a mask made irrelevant;
+  - it splits `(len == n) & (key == v)` into a short-circuit;
+  - it sinks a `pure` asm block.
+
+  What held is an **optimization barrier**: an empty, non-`pure` `asm!` block that takes and returns a register value, touches no memory and emits no instructions. This is the constant-time-code technique. It is allowed in the runtime crate, with a `// SAFETY:` comment, and compiled out under Miri.
+- A **codegen test** guards this: it builds a fixed benchmark-style loop over a generated map and counts conditional jumps in it. The test fails when a data-dependent branch appears.
+- SIMD is not used. Every load lands in general registers, and the spike found no need for it.
 
 ## Testing
 
 - Unit tests on the generator for every strategy, including key sets chosen to force each one.
 - Property tests: random key sets of many sizes and shapes (shared prefixes, shared suffixes, all same length, very long keys, empty string, non-ASCII UTF-8). Every key must be found with the right value, and random non-keys must return `None`. Compare against `std::collections::HashMap` as the reference.
 - Compile-fail tests (for example with `trybuild`) for duplicate keys, non-string keys and a malformed header.
-- Miri on the portable path.
-- Run the test suite on the portable fallback too, not just SSE2.
+- Miri on the runtime's load and lookup code, over exact-length allocations of every length 0..=40.
+- The codegen test (see "Table layout and lookup").
+- Tests for every representation: key values are exact (any byte change alters them) for every length a class or signature covers.
 
 ## Benchmarks
 
@@ -157,24 +183,42 @@ Key sets (use real data where possible):
 - random words at 1,000 and 3,000 keys
 - a set built to be hard: long shared prefixes and same lengths
 
-Workloads per key set: all hits, all misses, and a 50/50 mix. Lookups in shuffled order so branch prediction can't memorize them. Report ns per lookup and include build-time (macro expansion) numbers.
+Workloads per key set: all hits, all misses, and a 50/50 mix.
 
-Measurement (my call): the main number is throughput, independent lookups back to back in shuffled order, the same method as Lemire's published benchmarks. Also report latency (each lookup's input depends on the previous result) as a secondary number. Every competitor, including the C++ reference, runs on identical inputs with identical methodology.
+Measurement (decided by the spike, after the first harness was found invalid):
+- **Throughput only.** Independent lookups back to back.
+- **No memorized sequences.** Every timed call sees a fresh random permutation of the queries, and its warm-up call uses a different one, so the branch predictor can't memorize the sequence. The spike's first harness replayed one sequence, and Zen 5 learned it.
+- **Interleaved competitors** within each sample, with the median over samples.
+- **Branch misses per lookup** are reported next to the time, read from hardware counters.
+- **Per-query agreement:** every competitor gives the reference answer on every query.
+- Latency mode is dropped, because branchy lookups break the data dependency it relies on.
 
 The C++ reference is Lemire's library in its default, published configuration (the one his blog post benchmarks), even though it uses a 16-byte over-read that we forbid. That makes the comparison against the best known number, and the gap shows what the safety rule costs.
 
-**Success targets (my call on the numbers):** on this box, faster than every Rust competitor on every small and medium string key set, with a large margin (2x or more) over `phf` and `frozen-collections` on typical keyword sets, and within about 1.5x of Lemire's C++ library. These are targets to report against, not release gates. A tie with plain `match` on tiny sets (a handful of keys) is acceptable, since there the best strategy may compile to about the same code, and is reported as a tie. Results go in a `BENCHMARKS.md` with the commands to reproduce them.
+**Success targets (my call on the numbers):**
+- **No regression from the spike:** on the spike's four key sets, `pickmap`'s hit-only and miss-only numbers are no more than 10% slower than the spike's `pickmap-spike` numbers in `docs/spike-results.md`.
+- **Margin:** 2x or more over the better of `phf` and `frozen-collections` on mixed workloads, for small and medium sets.
+- **Lemire:** within about 2x of his library on hit-only and miss-only workloads. The spike reached 1.15-2.1x, and the gap is the cost of the safety rule.
+
+These are targets to report against, not release gates. Results go in a `BENCHMARKS.md` with the commands to reproduce them.
 
 ## Phases
 
 **Phase 0: performance spike, with a go/no-go decision (decided).** Before building the macro or generator, hand-write the lookup (picked-byte hash plus safe padded compare) for 3 to 4 of the benchmark key sets, for example HTTP methods, header names, Rust keywords, and 1,000 random words. Tables may be computed by a throwaway script or by hand. Benchmark these against `phf`, `frozen-collections`, `match`, `HashMap` with `foldhash`, and Lemire's C++ library, using the methodology above.
 
-- **Go:** clearly faster than `phf` and `frozen-collections` on these sets. Continue to phase 1, and carry over what the spike learned (best compare method, whether SIMD helps, layout).
+- **Go:** clearly faster than `phf` and `frozen-collections` on these sets. Continue to phase 1, and carry over what the spike learned (best compare method, layout).
 - **No-go:** not clearly faster. Stop and rethink with the user before writing more code.
 
 The spike code is throwaway. The benchmark harness may be kept and grown.
 
-**Phase 1: the crate.** Generator, proc macro, runtime, tests, and the full benchmark suite as described above.
+**Phase 0 outcome: GO** (three rounds; see `docs/spike-results.md` on `spike/round3`).
+
+**Phase 1: the crate.** Generator, proc macro, runtime, tests, codegen test, and the full benchmark suite as described above. It starts from `master`, carries over `keysets/` and `bench/` from the spike, and drops the spike crate.
+
+**Later, driven by benchmarks:**
+- a cheaper representation for sets with a wide key-length range (headers);
+- the branch-free lookup variant;
+- aarch64 numbers.
 
 ## Credit
 
@@ -183,9 +227,9 @@ The README credits Daniel Lemire's post and `ConstexprCore/perfect_hash` (MIT) f
 ## Left to the builder
 
 - Final crate names before publishing. Working names: `pickmap` (runtime, which users depend on), `pickmap-macros`, and `pickmap-gen`. `pickmap` was free on crates.io on 2026-10-30.
-- Benchmark framework (`criterion` or `divan`).
-- Exact thresholds, position-search limits, time budgets, table size limits, and the fixed key width.
+- Benchmark framework: the spike's custom harness is the default (see Benchmarks).
+- Exact search budgets, position candidates and table size limits. The spike's values are the starting point: positions `Start(0..8)` and `End(0..8)`, 200,000 search steps per attempt, tables up to 8x `next_power_of_two(n)`, and for PtHash up to 64 seeds and 2^20 pilots.
+- **Expansion speed:** proc macros build unoptimized by default (`build-override` has `opt-level = 0`). The search must stay fast unoptimized: under 1 s for 3,000 keys is the target. If that's not reachable, the README recommends `[profile.dev.build-override] opt-level = 3`, and the expansion-time numbers say so.
 - Choice of proc-macro parsing approach, as long as dependencies stay light.
 - Exact `iter` signature and whether the trait uses an associated iterator type.
-- How tables are laid out in generated code (struct of arrays vs array of structs), decided by benchmark.
-- Whether SIMD is used for the compare at all, decided by benchmark.
+- How tables are laid out in generated code, for example whether `len` moves out of the slot, decided by benchmark.
