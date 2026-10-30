@@ -18,8 +18,10 @@ fn empty_never_matches() {
 
 #[test]
 fn find_long_compares_bytes() {
-    let x: &'static str = "x".repeat(40).leak();
-    let y: &'static str = "y".repeat(40).leak();
+    // Literals, not leaked Strings: Miri reports leaks.
+    let x = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    let y = "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy";
+    assert_eq!((x.len(), y.len()), (40, 40));
     let keys = [x, y];
     let s = Slot::<4> { key: [0; 4], len: 40, idx: 1 };
     assert_eq!(s.find_long(&[0; 4], y.as_bytes(), &keys), Some(1));
