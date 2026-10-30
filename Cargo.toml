@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["keysets", "pickmap-core"]
+members = ["keysets", "pickmap-core", "pickmap"]
 
 [workspace.package]
 edition = "2024"

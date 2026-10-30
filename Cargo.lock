@@ -7,6 +7,13 @@ name = "keysets"
 version = "0.0.0"
 
 [[package]]
+name = "pickmap"
+version = "0.1.0"
+dependencies = [
+ "pickmap-core",
+]
+
+[[package]]
 name = "pickmap-core"
 version = "0.1.0"
 dependencies = [

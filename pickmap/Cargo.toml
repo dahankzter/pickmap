@@ -1,0 +1,9 @@
+[package]
+name = "pickmap"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Compile-time perfect-hash string maps: static_map! generates a branch-free lookup for each key set."
+
+[dependencies]
+pickmap-core = { path = "../pickmap-core" }
