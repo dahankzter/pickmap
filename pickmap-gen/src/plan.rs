@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use pickmap_core::hash::{h_long, h_value, hash_tag, picked_slot, pthash_slot};
 use pickmap_core::slot::{MAX_KEY_LEN, Slot, meta};
 
-use crate::repr::{Repr, repr_for};
+use crate::repr::{Repr, repr_for, repr_for_hashing};
 use crate::search::{Strategy, search, slot_of, table_len};
 
 pub struct Plan {
@@ -26,8 +26,14 @@ pub fn plan(keys: &[&str]) -> Result<Plan, String> {
         return Err(format!("key of {} bytes is longer than the supported {MAX_KEY_LEN}", k.len()));
     }
     let bytes: Vec<&[u8]> = keys.iter().map(|k| k.as_bytes()).collect();
-    let repr = repr_for(&bytes);
-    let strategy = search(&bytes, repr)?;
+    let mut repr = repr_for(&bytes);
+    let mut strategy = search(&bytes, repr);
+    // A split value only suits picked bytes; a hashed (PtHash) map takes another one.
+    if matches!(repr, Repr::Split { .. }) && !matches!(strategy, Ok(Strategy::Picked { .. })) {
+        repr = repr_for_hashing(&bytes);
+        strategy = search(&bytes, repr);
+    }
+    let strategy = strategy?;
     let mut slots = vec![None; table_len(&strategy)];
     for (i, k) in bytes.iter().enumerate() {
         let s = slot_of(&strategy, repr, k);

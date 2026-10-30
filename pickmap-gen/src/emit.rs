@@ -112,6 +112,7 @@ fn lookup(
     let value_expr = match plan.repr {
         Repr::Classes { classes, .. } => quote!(#p::key_value::<#words, #classes>(k)),
         Repr::Sig { w, c, .. } => quote!(#p::signature::<#w, #c, #words>(k)),
+        Repr::Split { c, short, .. } => quote!(#p::split_value::<#words, #c, #short>(k)),
     };
 
     let table = plan.slots.len();

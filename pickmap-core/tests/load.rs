@@ -45,6 +45,14 @@ fn signature_is_exact() {
 }
 
 #[test]
+fn split_value_is_exact() {
+    use pickmap_core::load::split_value;
+    exact_check(0..=32, split_value::<4, 4, { SMALL | MID }>, "split 4x8 + small/mid");
+    exact_check(0..=16, split_value::<2, 2, { SMALL | MID }>, "split 2x8 + small/mid");
+    exact_check(4..=24, split_value::<4, 3, MID>, "split 3x8 + mid");
+}
+
+#[test]
 fn with_forms_match_const_forms() {
     let mut rng = SplitMix64(5);
     for len in 0..=40 {
@@ -68,6 +76,7 @@ fn miri_all_lengths() {
         std::hint::black_box(signature::<2, 4, 1>(&k));
         std::hint::black_box(signature::<4, 3, 2>(&k));
         std::hint::black_box(signature::<8, 4, 4>(&k));
+        std::hint::black_box(pickmap_core::load::split_value::<4, 4, { SMALL | MID }>(&k));
         for pos in [pickmap_core::hash::Pos::Start(7), pickmap_core::hash::Pos::End(7)] {
             std::hint::black_box(pickmap_core::hash::pick_byte(&k, pos));
         }

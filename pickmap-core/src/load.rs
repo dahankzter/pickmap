@@ -140,3 +140,22 @@ pub fn signature_with<const WORDS: usize>(k: &[u8], w: usize, c: usize) -> [u64;
     }
     v
 }
+
+/// Branch-free exact value for sets whose key lengths straddle 8 bytes: inputs of 8 bytes
+/// or more use `C` overlapping 8-byte words at offsets `min(8 * i, len - 8)`, shorter ones
+/// the `SHORT` classes ([`SMALL`] and/or [`MID`]). Exact for keys up to `8 * C` bytes.
+#[inline(always)]
+pub fn split_value<const WORDS: usize, const C: usize, const SHORT: u8>(k: &[u8]) -> [u64; WORDS] {
+    split_value_with(k, C, SHORT)
+}
+
+/// [`split_value`] with `c` and `short` as run-time arguments, for build-time use.
+#[inline(always)]
+pub fn split_value_with<const WORDS: usize>(k: &[u8], c: usize, short: u8) -> [u64; WORDS] {
+    // Each half is zero outside its range: the signature reads the zero buffer for inputs
+    // under 8 bytes, and without BIG the short classes give 0 from 8 bytes on. So the
+    // halves combine with a plain OR, no select.
+    let mut v = signature_with::<WORDS>(k, 8, c);
+    v[0] |= key_value_with::<1>(k, short & (SMALL | MID))[0];
+    v
+}
