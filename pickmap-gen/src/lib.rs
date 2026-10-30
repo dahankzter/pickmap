@@ -4,3 +4,4 @@
 pub mod repr;
 pub mod plan;
 pub mod search;
+pub mod parse;

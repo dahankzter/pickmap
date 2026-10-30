@@ -9,7 +9,7 @@ description = "Code generator behind pickmap's static_map! macro."
 pickmap-core = { path = "../pickmap-core" }
 proc-macro2 = "1"
 quote = "1"
-litrs = "1"
+litrs = { version = "1", features = ["proc-macro2"] }
 
 [dev-dependencies]
 keysets = { path = "../keysets" }
