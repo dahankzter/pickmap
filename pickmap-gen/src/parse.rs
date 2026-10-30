@@ -127,29 +127,16 @@ pub fn parse(input: TokenStream) -> Result<MapInput, Error> {
     Ok(MapInput { vis, name, value_ty, entries })
 }
 
-/// Tokens up to the next top-level `,`. A comma inside a turbofish (`::<A, B>`) is not
-/// top level; commas inside groups are already nested in the group's token tree.
+/// Tokens up to the comma that ends this entry: one followed by the end of input, or by
+/// a single token and `=>` (the next key). Commas anywhere else belong to the value, as
+/// in closures (`|a, b| ...`), qualified paths (`<G<A, B>>::N`) or turbofish generics.
 fn value_tokens(c: &mut Cursor) -> TokenStream {
     let mut out = TokenStream::new();
-    let mut angle = 0usize;
-    loop {
-        if angle == 0 && c.is_punct(0, ',') {
+    while c.peek().is_some() {
+        if c.is_punct(0, ',') && (c.peek_at(1).is_none() || (c.is_punct(2, '=') && c.is_punct(3, '>'))) {
             break;
         }
-        if c.is_punct(0, ':') && c.is_punct(1, ':') && c.is_punct(2, '<') {
-            angle += 1;
-            out.extend([c.next().unwrap(), c.next().unwrap(), c.next().unwrap()]);
-            continue;
-        }
-        if angle > 0 && c.is_punct(0, '<') {
-            angle += 1;
-        } else if angle > 0 && c.is_punct(0, '>') {
-            angle -= 1;
-        }
-        match c.next() {
-            Some(t) => out.extend([t]),
-            None => break,
-        }
+        out.extend(c.next());
     }
     out
 }
@@ -180,6 +167,18 @@ mod tests {
         let squash = |t: &TokenStream| t.to_string().replace(' ', "");
         assert_eq!(squash(&m.entries[0].value), "Foo::<A,B>::NEW");
         assert_eq!(squash(&m.entries[1].value), "[1,2]");
+    }
+
+    #[test]
+    fn parse_commas_inside_values() {
+        let m = p(r#"M: V; "add" => |a, b| a + b, "q" => <G<u8, u16>>::N, "f" => G::<fn() -> u8, u16>::N, "z" => 1"#)
+            .unwrap_or_else(|e| panic!("{}", e.message));
+        let keys: Vec<&str> = m.entries.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, ["add", "q", "f", "z"]);
+        let squash = |t: &TokenStream| t.to_string().replace(' ', "");
+        assert_eq!(squash(&m.entries[0].value), "|a,b|a+b");
+        assert_eq!(squash(&m.entries[1].value), "<G<u8,u16>>::N");
+        assert_eq!(squash(&m.entries[2].value), "G::<fn()->u8,u16>::N");
     }
 
     #[test]
