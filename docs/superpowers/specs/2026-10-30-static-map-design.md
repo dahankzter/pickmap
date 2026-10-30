@@ -141,10 +141,12 @@ Empty slots carry a length no input can have.
 - `get(key)`:
   1. compute the key value;
   2. compute the slot;
-  3. compare length and every key word in **one** combined comparison: `(len ^ n) | (key_0 ^ v_0) | ...` equals 0;
+  3. compare the key:
+     - **picked-byte maps:** length and every key word in **one** combined comparison, `(len ^ n) | (key_0 ^ v_0) | ...` equals 0;
+     - **PtHash maps:** first length plus an 8-bit tag of the key's hash. A near-miss has a different hash, so this branch is in effect hit-or-miss. Then the key words, which only likely hits reach. A tag on picked-byte maps would need an extra multiply, and measured slower;
   4. on a match, return `Some(&VALUES[index])`.
 
-  Everything before the final hit/miss branch must be free of data-dependent branches.
+  Every branch before the answer must be predictable on any input stream, including near-misses. The tag check qualifies because it is effectively the hit/miss branch itself.
 - **LLVM re-creates branches** unless prevented. The spike found four ways it does this, all despite `core::hint::select_unpredictable`:
   - it turns a select that involves a memory load into a branch;
   - it branches around work a mask made irrelevant;

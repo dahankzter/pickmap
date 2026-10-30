@@ -2,8 +2,8 @@
 
 Compile-time perfect-hash string maps for Rust. `static_map!` reads a map's keys at
 build time and generates a lookup specialized to them: a perfect hash over a few chosen
-bytes, or a PtHash fallback for larger sets. The key compare is free of data-dependent
-branches.
+bytes, or a PtHash fallback for larger sets. The key compare never mispredicts, even on
+inputs that nearly match a key.
 
 ```rust
 use pickmap::static_map;
@@ -41,8 +41,8 @@ fn main() {
 
 On a Zen 5 machine, with shuffled lookups and branch misses counted, `pickmap` is the
 fastest Rust option on every key set measured:
-- 1.5-5x faster than the best of `phf`, `frozen-collections` and `quickphf` on hit-only and miss-only streams;
-- 1.25-2.1x faster on a 50/50 mix;
+- 1.5-5.7x faster than the best of `phf`, `frozen-collections` and `quickphf` on hit-only and miss-only streams;
+- 1.25-2.2x faster on a 50/50 mix;
 - within about 2x of Daniel Lemire's C++ `perfect_hash`, which reads past the end of keys.
 
 See [BENCHMARKS.md](BENCHMARKS.md) for the full tables and how to reproduce them.
