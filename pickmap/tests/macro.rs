@@ -233,3 +233,28 @@ fn workloads_give_the_same_answers() {
     assert_eq!(LONG_HITS.get("AAAAAAAAAAAAAAAAyyyyqyyyZZZZZZZZZZZZZZZZ"), None);
     assert_eq!(LONG_HITS.get("abc"), None);
 }
+
+// Value types written without `'static`: references in a static are `'static` anyway.
+static_map! { RAW: &[u8]; "a" => b"alpha", "b" => b"beta" }
+static_map! { PAIRS: (&str, Option<&[u8]>); "x" => ("ex", None), "y" => ("why", Some(b"y")) }
+static_map! { COWS: std::borrow::Cow<'_, str>; "c" => std::borrow::Cow::Borrowed("cow") }
+
+#[test]
+fn elided_lifetimes_in_value_type() {
+    assert_eq!(RAW.get("b"), Some(&&b"beta"[..]));
+    assert_eq!(PAIRS.get("y"), Some(&("why", Some(&b"y"[..]))));
+    assert_eq!(COWS.get("c").map(|c| c.as_ref()), Some("cow"));
+}
+
+fn str_len(s: &str) -> usize {
+    s.len()
+}
+
+static_map! { HANDLERS: fn(&str) -> usize; "len" => str_len }
+
+#[test]
+fn fn_pointer_values_keep_their_lifetimes() {
+    let local = String::from("four");
+    // Callable with a non-'static string: the signature was not rewritten.
+    assert_eq!(HANDLERS.get("len").map(|f| f(&local)), Some(4));
+}

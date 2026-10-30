@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use proc_macro2::{Delimiter, Ident, Span, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 use quote::quote_spanned;
 
 /// What lookups mostly look like, from `#[pickmap(workload = "...")]`. A performance
@@ -167,7 +167,54 @@ pub fn parse(input: TokenStream) -> Result<MapInput, Error> {
         }
         entries.push(Entry { key, key_span, value });
     }
+    let value_ty = static_lifetimes(value_ty);
     Ok(MapInput { attrs, cfg_attrs, workload: workload.unwrap_or_default(), vis, name, value_ty, entries })
+}
+
+/// Makes elided lifetimes in the value type explicit: `&T` becomes `&'static T` and `'_`
+/// becomes `'static`. A static's references are `'static` anyway, but the generated
+/// methods and trait impl need it written out. Function-pointer and `Fn*` signatures are
+/// left alone, since there an elided lifetime means "any lifetime".
+pub fn static_lifetimes(ty: TokenStream) -> TokenStream {
+    let tokens: Vec<TokenTree> = ty.into_iter().collect();
+    let mut out = Vec::with_capacity(tokens.len());
+    let mut in_fn = false;
+    let mut i = 0;
+    while i < tokens.len() {
+        let t = &tokens[i];
+        match t {
+            TokenTree::Ident(id) if ["fn", "Fn", "FnMut", "FnOnce"].contains(&id.to_string().as_str()) => in_fn = true,
+            // A comma ends one type in a tuple or generic list, and with it the signature.
+            TokenTree::Punct(p) if p.as_char() == ',' => in_fn = false,
+            _ => {}
+        }
+        if in_fn {
+            out.push(t.clone());
+            i += 1;
+            continue;
+        }
+        match t {
+            TokenTree::Punct(p) if p.as_char() == '&' => {
+                out.push(t.clone());
+                let has_lifetime = matches!(tokens.get(i + 1), Some(TokenTree::Punct(q)) if q.as_char() == '\'');
+                if !has_lifetime {
+                    out.push(TokenTree::Punct(Punct::new('\'', Spacing::Joint)));
+                    out.push(TokenTree::Ident(Ident::new("static", p.span())));
+                }
+            }
+            TokenTree::Ident(id) if id == "_" && i > 0 && matches!(&tokens[i - 1], TokenTree::Punct(q) if q.as_char() == '\'') => {
+                out.push(TokenTree::Ident(Ident::new("static", id.span())));
+            }
+            TokenTree::Group(g) => {
+                let mut inner = Group::new(g.delimiter(), static_lifetimes(g.stream()));
+                inner.set_span(g.span());
+                out.push(TokenTree::Group(inner));
+            }
+            _ => out.push(t.clone()),
+        }
+        i += 1;
+    }
+    out.into_iter().collect()
 }
 
 /// The `(workload = "...")` part of `#[pickmap(...)]`.
@@ -352,6 +399,20 @@ mod tests {
                 Err(e) => assert_eq!(e.message, msg, "{src:?}"),
             }
         }
+    }
+
+    #[test]
+    fn value_type_lifetimes_become_static() {
+        let squash = |src: &str| static_lifetimes(src.parse().unwrap()).to_string().replace(' ', "");
+        assert_eq!(squash("&[u8]"), "&'static[u8]");
+        assert_eq!(squash("(&str, Option<&[u8]>)"), "(&'staticstr,Option<&'static[u8]>)");
+        assert_eq!(squash("Cow<'_, str>"), "Cow<'static,str>");
+        assert_eq!(squash("&&str"), "&'static&'staticstr");
+        assert_eq!(squash("&'a str"), "&'astr");
+        assert_eq!(squash("fn(&str) -> &str"), "fn(&str)->&str");
+        assert_eq!(squash("(fn(&str) -> u8, &str)"), "(fn(&str)->u8,&'staticstr)");
+        assert_eq!(squash("&dyn Fn(&str) -> bool"), "&'staticdynFn(&str)->bool");
+        assert_eq!(squash("u8"), "u8");
     }
 
     #[test]
