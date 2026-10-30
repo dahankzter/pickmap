@@ -1,0 +1,5 @@
+error: unknown workload "fast"; expected "general", "mostly_hits" or "keyword_scan"
+ --> tests/ui/unknown_workload.rs:2:26
+  |
+2 |     #[pickmap(workload = "fast")]
+  |                          ^^^^^^

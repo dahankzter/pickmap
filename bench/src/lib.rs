@@ -78,6 +78,7 @@ macro_rules! lemire {
 macro_rules! set_cases {
     ($out:ident, $set:ident) => {
         case!($out, $set, "pickmap", competitors::$set::pick_get);
+        case!($out, $set, "pickmap-keyword-scan", competitors::$set::pick_kw_get);
         case!($out, $set, "quickphf", competitors::$set::quickphf_get);
         case!($out, $set, "match", competitors::$set::match_get);
         case!($out, $set, "phf", competitors::$set::phf_get);

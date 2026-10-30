@@ -3,13 +3,13 @@
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote};
 
-use crate::parse::MapInput;
+use crate::parse::{MapInput, Workload};
 use crate::plan::Plan;
 use crate::repr::Repr;
 use crate::search::Strategy;
 
 pub fn emit(input: &MapInput, plan: &Plan) -> TokenStream {
-    let MapInput { vis, name, value_ty: ty, entries } = input;
+    let MapInput { attrs, cfg_attrs, vis, name, value_ty: ty, entries, .. } = input;
     let ty_name = format_ident!("__Pickmap_{}", name);
     // At module level, not inside the `const _` block: value expressions must resolve
     // names in the user's scope, not see these.
@@ -32,19 +32,25 @@ pub fn emit(input: &MapInput, plan: &Plan) -> TokenStream {
     };
 
     quote! {
+        #(#cfg_attrs)*
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
         #vis struct #ty_name;
 
+        #(#cfg_attrs)*
+        #(#attrs)*
         #vis static #name: #ty_name = #ty_name;
 
+        #(#cfg_attrs)*
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         static #keys_name: [&::core::primitive::str; #n] = [#(#keys),*];
+        #(#cfg_attrs)*
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         static #values_name: [#ty; #n] = [#(#values),*];
 
+        #(#cfg_attrs)*
         const _: () = {
             impl #ty_name {
                 #tables_and_get
@@ -156,7 +162,12 @@ fn lookup(
         }
     };
 
+    // The workload only changes picked-byte maps: PtHash maps' tagged compare is already
+    // as fast as early exits, without their risk.
+    let early = input.workload != Workload::General;
     let find = match (plan.tagged(), plan.has_long) {
+        (false, false) if early => quote!(SLOTS[slot].find_early(&v, k.len())),
+        (false, true) if early => quote!(SLOTS[slot].find_early_long(&v, k, &#keys_name)),
         (false, false) => quote!(SLOTS[slot].find(&v, k.len())),
         (false, true) => quote!(SLOTS[slot].find_long(&v, k, &#keys_name)),
         (true, false) => quote!(SLOTS[slot].find_tagged(&v, meta)),

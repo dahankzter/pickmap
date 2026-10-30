@@ -7,7 +7,26 @@ use std::collections::HashMap;
 use proc_macro2::{Delimiter, Ident, Span, TokenStream, TokenTree};
 use quote::quote_spanned;
 
+/// What lookups mostly look like, from `#[pickmap(workload = "...")]`. A performance
+/// hint only: every workload gives the same answers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Workload {
+    /// Any input, including near-misses and input from users or the network.
+    #[default]
+    General,
+    /// Nearly every lookup finds a key.
+    MostlyHits,
+    /// Most lookups miss with words that look nothing like the keys (lexers checking
+    /// identifiers for keywords).
+    KeywordScan,
+}
+
 pub struct MapInput {
+    /// Attributes for the generated static, doc comments included.
+    pub attrs: Vec<TokenStream>,
+    /// `#[cfg]` and `#[cfg_attr]` attributes, for every generated item.
+    pub cfg_attrs: Vec<TokenStream>,
+    pub workload: Workload,
     pub vis: TokenStream,
     pub name: Ident,
     pub value_ty: TokenStream,
@@ -69,6 +88,25 @@ impl Cursor {
 pub fn parse(input: TokenStream) -> Result<MapInput, Error> {
     let mut c = Cursor { tokens: input.into_iter().collect(), at: 0 };
 
+    let mut attrs = Vec::new();
+    let mut cfg_attrs = Vec::new();
+    let mut workload = None;
+    while c.is_punct(0, '#') {
+        let hash = c.next().unwrap();
+        let group = match c.next() {
+            Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket => g,
+            _ => return Err(Error::new(hash.span(), "expected `[` after `#`")),
+        };
+        let mut inner = group.stream().into_iter();
+        match inner.next() {
+            Some(TokenTree::Ident(i)) if i == "pickmap" => parse_options(inner, &mut workload)?,
+            Some(TokenTree::Ident(i)) if i == "cfg" || i == "cfg_attr" => {
+                cfg_attrs.push(TokenStream::from_iter([hash, TokenTree::Group(group)]))
+            }
+            _ => attrs.push(TokenStream::from_iter([hash, TokenTree::Group(group)])),
+        }
+    }
+
     let mut vis = TokenStream::new();
     if matches!(c.peek(), Some(TokenTree::Ident(i)) if i == "pub") {
         vis.extend(c.next());
@@ -124,7 +162,59 @@ pub fn parse(input: TokenStream) -> Result<MapInput, Error> {
         }
         entries.push(Entry { key, key_span, value });
     }
-    Ok(MapInput { vis, name, value_ty, entries })
+    Ok(MapInput { attrs, cfg_attrs, workload: workload.unwrap_or_default(), vis, name, value_ty, entries })
+}
+
+/// The `(workload = "...")` part of `#[pickmap(...)]`.
+fn parse_options(mut tokens: impl Iterator<Item = TokenTree>, workload: &mut Option<Workload>) -> Result<(), Error> {
+    let group = match tokens.next() {
+        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis => g,
+        other => {
+            let span = other.map_or_else(Span::call_site, |t| t.span());
+            return Err(Error::new(span, "expected `pickmap(workload = \"...\")`"));
+        }
+    };
+    let mut c = Cursor { tokens: group.stream().into_iter().collect(), at: 0 };
+    while let Some(t) = c.next() {
+        let TokenTree::Ident(key) = &t else {
+            return Err(Error::new(t.span(), "expected `workload`"));
+        };
+        if key != "workload" {
+            return Err(Error::new(key.span(), format!("unknown pickmap option `{key}`; expected `workload`")));
+        }
+        if !c.is_punct(0, '=') {
+            return Err(Error::new(c.span(), "expected `=` after `workload`"));
+        }
+        c.next();
+        let value = match c.next() {
+            Some(TokenTree::Literal(lit)) => match litrs::StringLit::try_from(&lit) {
+                Ok(s) => (s.value().to_owned(), lit.span()),
+                Err(_) => return Err(Error::new(lit.span(), "expected a string, like `workload = \"keyword_scan\"`")),
+            },
+            other => {
+                let span = other.map_or_else(|| key.span(), |t| t.span());
+                return Err(Error::new(span, "expected a string, like `workload = \"keyword_scan\"`"));
+            }
+        };
+        let parsed = match value.0.as_str() {
+            "general" => Workload::General,
+            "mostly_hits" => Workload::MostlyHits,
+            "keyword_scan" => Workload::KeywordScan,
+            other => {
+                return Err(Error::new(
+                    value.1,
+                    format!("unknown workload {other:?}; expected \"general\", \"mostly_hits\" or \"keyword_scan\""),
+                ));
+            }
+        };
+        if workload.replace(parsed).is_some() {
+            return Err(Error::new(key.span(), "duplicate `workload` option"));
+        }
+        if c.is_punct(0, ',') {
+            c.next();
+        }
+    }
+    Ok(())
 }
 
 /// Tokens up to the comma that ends this entry: one followed by the end of input, or by
@@ -201,6 +291,54 @@ mod tests {
             (r#"M: u8; "a" =>"#, "expected a value expression"),
             (r#"M: u8; "a" => , "b" => 1"#, "expected a value expression"),
             (r#"M: u8; "a" => 1, "a" => 2"#, "duplicate key \"a\""),
+        ] {
+            match p(src) {
+                Ok(_) => panic!("{src:?} parsed"),
+                Err(e) => assert_eq!(e.message, msg, "{src:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_attributes() {
+        let m = p(r#"
+            /// Doc line.
+            #[cfg(feature = "x")]
+            #[pickmap(workload = "keyword_scan")]
+            #[allow(dead_code)]
+            pub M: u8; "a" => 1
+        "#)
+        .unwrap_or_else(|e| panic!("{}", e.message));
+        assert_eq!(m.workload, Workload::KeywordScan);
+        let squash = |ts: &[TokenStream]| ts.iter().map(|t| t.to_string().replace(' ', "")).collect::<Vec<_>>();
+        assert_eq!(squash(&m.cfg_attrs), ["#[cfg(feature=\"x\")]"]);
+        let attrs = squash(&m.attrs);
+        assert_eq!(attrs.len(), 2);
+        assert!(attrs[0].starts_with("#[doc="), "{attrs:?}");
+        assert_eq!(attrs[1], "#[allow(dead_code)]");
+        assert_eq!(m.vis.to_string(), "pub");
+    }
+
+    #[test]
+    fn parse_workloads() {
+        for (src, want) in [
+            ("M: u8;", Workload::General),
+            (r#"#[pickmap(workload = "general")] M: u8;"#, Workload::General),
+            (r#"#[pickmap(workload = "mostly_hits")] M: u8;"#, Workload::MostlyHits),
+            (r#"#[pickmap(workload = "keyword_scan")] M: u8;"#, Workload::KeywordScan),
+        ] {
+            assert_eq!(p(src).unwrap_or_else(|e| panic!("{}", e.message)).workload, want, "{src}");
+        }
+    }
+
+    #[test]
+    fn parse_attribute_errors() {
+        for (src, msg) in [
+            (r#"#[pickmap(workload = "fast")] M: u8;"#, "unknown workload \"fast\"; expected \"general\", \"mostly_hits\" or \"keyword_scan\""),
+            (r#"#[pickmap(speed = "fast")] M: u8;"#, "unknown pickmap option `speed`; expected `workload`"),
+            (r#"#[pickmap(workload = fast)] M: u8;"#, "expected a string, like `workload = \"keyword_scan\"`"),
+            (r#"#[pickmap(workload = "general")] #[pickmap(workload = "general")] M: u8;"#, "duplicate `workload` option"),
+            ("# M: u8;", "expected `[` after `#`"),
         ] {
             match p(src) {
                 Ok(_) => panic!("{src:?} parsed"),

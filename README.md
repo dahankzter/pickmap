@@ -37,6 +37,37 @@ fn main() {
 - `iter()` yields entries in declaration order.
 - Each map has its own generated type, which implements `pickmap::StaticMap`, so generic code can take `&impl StaticMap<Value = V>`.
 
+## Attributes and workloads
+
+Attributes go before the map's name. `///` doc comments and other attributes apply to
+the generated static, and `#[cfg(...)]` / `#[cfg_attr(...)]` apply to everything the
+macro generates.
+
+`#[pickmap(workload = "...")]` describes what lookups mostly look like. It is a
+performance hint and never changes results:
+
+- `"general"` (the default): any input, including near-misses (shared prefixes, typos),
+  and input from users or the network. Speed never collapses.
+- `"keyword_scan"`: most lookups miss with words that look nothing like the keys, as when
+  a lexer checks identifiers against keywords.
+- `"mostly_hits"`: nearly every lookup finds a key, as when decoding names your own
+  program wrote.
+
+```rust
+pickmap::static_map! {
+    /// Rust keywords.
+    #[pickmap(workload = "keyword_scan")]
+    pub KEYWORDS: Keyword;
+    "fn" => Keyword::Fn,
+    "let" => Keyword::Let,
+}
+```
+
+The last two make small maps compare keys with early exits. That is 3-23% faster in the
+benchmarks, but it can be up to about 3x slower on misses that resemble keys. Large
+maps ignore the hint, because their default compare is already as fast. When unsure,
+leave the default.
+
 ## Performance
 
 On a Zen 5 machine, with shuffled lookups and branch misses counted, `pickmap` is the
@@ -54,6 +85,7 @@ Planning a map stays well under a second without profile tweaks. In an unoptimiz
 
 - String keys only, exact byte match.
 - Only `get`. A branch-free variant for unpredictable streams may come later.
+- Attributes inside the map (on individual entries) are not supported.
 - Keys longer than 32 bytes work, through a slower byte-by-byte compare that only maps
   containing such keys pay for.
 

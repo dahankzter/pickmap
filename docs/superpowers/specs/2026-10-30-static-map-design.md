@@ -72,6 +72,10 @@ assert_eq!(METHODS.len(), 4);
 
 Rules:
 
+- Attributes may precede the header (added after phase 1):
+  - `///` docs and ordinary attributes apply to the static.
+  - `#[cfg]` and `#[cfg_attr]` apply to every generated item.
+  - `#[pickmap(workload = "general" | "keyword_scan" | "mostly_hits")]` is a performance hint that never changes results. `keyword_scan` and `mostly_hits` make picked-byte maps use an early-exit key compare: 3-23% faster when misses look nothing like the keys, up to about 3x slower on misses that resemble keys. PtHash maps ignore it, since their tagged compare is already as fast.
 - Header: optional visibility (`pub`, `pub(crate)`, ...), the static's name, `:`, the value type, `;`. The value type is required because a `static` needs a written type and a proc macro can't see types.
 - Entries: `"string literal" => const expression`, comma separated, trailing comma allowed.
 - The key type is `&str`, from the literals. A non-string key is a compile error with a clear message.

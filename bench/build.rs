@@ -74,6 +74,14 @@ fn emit_set(out: &mut String, name: &str, keys: &[String]) {
     writeln!(out, "    }}").unwrap();
     writeln!(out, "    #[inline]\n    pub fn pick_get(k: &str) -> Option<u32> {{ PICK.get(k).copied() }}").unwrap();
 
+    // The same map declared for a keyword-scan workload.
+    writeln!(out, "    pickmap::static_map! {{\n        #[pickmap(workload = \"keyword_scan\")]\n        pub PICK_KW: u32;").unwrap();
+    for (i, k) in keys.iter().enumerate() {
+        writeln!(out, "        {k:?} => {i},").unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    #[inline]\n    pub fn pick_kw_get(k: &str) -> Option<u32> {{ PICK_KW.get(k).copied() }}").unwrap();
+
     // quickphf.
     let qkeys: Vec<&str> = keys.iter().map(String::as_str).collect();
     let qvals: Vec<u32> = (0..keys.len() as u32).collect();

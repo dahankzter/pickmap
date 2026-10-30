@@ -18,8 +18,9 @@ use perf_event::events::Hardware;
 const SAMPLES: usize = 101;
 const SUSPICIOUS_NS: f64 = 0.3;
 
-const COMPETITORS: [&str; 7] = [
+const COMPETITORS: [&str; 8] = [
     "pickmap",
+    "pickmap-keyword-scan",
     "lemire-cpp",
     "quickphf",
     "match",

@@ -7,6 +7,11 @@
 //! - [`Slot::find_tagged`] (PtHash maps) first compares an 8-bit tag of the key's hash,
 //!   which they compute anyway. A near-miss has a different hash, so this branch is in
 //!   effect "hit or miss?". Only likely hits go on to the full compare.
+//!
+//! [`Slot::find_early`] is the opt-in exception, for picked-byte maps declared with a
+//! `keyword_scan` or `mostly_hits` workload: it compares word by word and stops at the
+//! first mismatch. That is cheaper when misses look nothing like the keys, but those
+//! branches mispredict when misses resemble keys.
 
 /// Longest supported key, in bytes: a tagged slot keeps the length in 24 bits.
 pub const MAX_KEY_LEN: usize = (1 << 24) - 2;
@@ -65,6 +70,32 @@ impl<const WORDS: usize> Slot<WORDS> {
             if self.meta as usize == k.len() && keys[i].as_bytes() == k { Some(i) } else { None }
         } else {
             self.find(v, k.len())
+        }
+    }
+
+    /// [`Slot::find`] with early exits: the first word, then the length, then the other
+    /// words, each its own branch (`meta` is the key length).
+    #[inline(always)]
+    pub fn find_early(&self, v: &[u64; WORDS], n: usize) -> Option<usize> {
+        if self.key[0] != v[0] || self.meta as u64 != n as u64 {
+            return None;
+        }
+        for i in 1..WORDS {
+            if self.key[i] != v[i] {
+                return None;
+            }
+        }
+        Some(self.idx as usize)
+    }
+
+    /// [`Slot::find_early`] for maps that hold keys longer than 32 bytes.
+    #[inline(always)]
+    pub fn find_early_long(&self, v: &[u64; WORDS], k: &[u8], keys: &[&str]) -> Option<usize> {
+        if k.len() > 32 {
+            let i = self.idx as usize;
+            if self.meta as usize == k.len() && keys[i].as_bytes() == k { Some(i) } else { None }
+        } else {
+            self.find_early(v, k.len())
         }
     }
 

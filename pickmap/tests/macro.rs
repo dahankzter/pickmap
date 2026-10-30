@@ -178,3 +178,58 @@ mod user_names_in_values {
 fn values_resolve_in_user_scope() {
     user_names_in_values::check();
 }
+
+#[deny(missing_docs)]
+pub mod documented {
+    //! A documented public map must pass `missing_docs`.
+
+    pickmap::static_map! {
+        /// HTTP methods, documented.
+        pub DOC_METHODS: u8;
+        "GET" => 1,
+    }
+}
+
+// Compiled out entirely: the value would not compile if any item survived.
+static_map! { #[cfg(any())] pub GONE: u8; "a" => does_not_exist() }
+static_map! { #[cfg(all())] pub KEPT: u8; "a" => 1 }
+
+#[test]
+fn doc_and_cfg_attributes() {
+    assert_eq!(documented::DOC_METHODS.get("GET"), Some(&1));
+    assert_eq!(KEPT.get("a"), Some(&1));
+}
+
+static_map! {
+    #[pickmap(workload = "keyword_scan")]
+    KW_SCAN: Method;
+    "GET" => Method::Get,
+    "HEAD" => Method::Head,
+    "POST" => Method::Post,
+    "PUT" => Method::Put,
+    "DELETE" => Method::Delete,
+}
+
+static_map! {
+    #[pickmap(workload = "mostly_hits")]
+    LONG_HITS: u8;
+    "AAAAAAAAAAAAAAAAxZZZZZZZZZZZZZZZZ" => 33,
+    "AAAAAAAAAAAAAAAAyyyyyyyyZZZZZZZZZZZZZZZZ" => 40,
+    "AAAAAAAAAAAAAAAAyyyyzyyyZZZZZZZZZZZZZZZZ" => 41,
+    "ab" => 2,
+}
+
+#[test]
+fn workloads_give_the_same_answers() {
+    for (k, v) in KW_SCAN.iter() {
+        assert_eq!(KW_SCAN.get(k), Some(v));
+    }
+    for q in ["", "G", "GETX", "get", &"x".repeat(100), "GÉT"] {
+        assert_eq!(KW_SCAN.get(q), None, "{q:?}");
+    }
+    for (k, v) in LONG_HITS.iter() {
+        assert_eq!(LONG_HITS.get(k), Some(v), "{k:?}");
+    }
+    assert_eq!(LONG_HITS.get("AAAAAAAAAAAAAAAAyyyyqyyyZZZZZZZZZZZZZZZZ"), None);
+    assert_eq!(LONG_HITS.get("abc"), None);
+}

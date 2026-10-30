@@ -11,6 +11,19 @@ fn find_matches_only_equal() {
 }
 
 #[test]
+fn find_early_matches_only_equal() {
+    let s = Slot::<2> { key: [1, 2], meta: 9, idx: 4 };
+    assert_eq!(s.find_early(&[1, 2], 9), Some(4));
+    assert_eq!(s.find_early(&[1, 2], 8), None);
+    assert_eq!(s.find_early(&[1, 3], 9), None);
+    assert_eq!(s.find_early(&[0, 2], 9), None);
+    assert_eq!(s.find_early(&[1, 2], 9 + (1 << 32)), None);
+    for n in 0..=64 {
+        assert_eq!(Slot::<1>::EMPTY.find_early(&[0], n), None);
+    }
+}
+
+#[test]
 fn find_tagged_matches_only_equal() {
     let s = Slot::<2> { key: [1, 2], meta: meta(9, 7), idx: 4 };
     assert_eq!(s.find_tagged(&[1, 2], meta(9, 7)), Some(4));

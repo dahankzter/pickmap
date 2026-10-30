@@ -37,6 +37,12 @@ taskset -c 4 target/release/report
   - Picked-byte maps compare length and all key words in one combined expression, then branch once.
   - PtHash maps check an 8-bit tag of the key's hash first, which is effectively the hit-or-miss question, then compare words only for likely hits.
 
+- **`workload = "keyword_scan"`** (`pickmap-keyword-scan` rows). Picked-byte maps compare key words with early exits:
+  - 3-23% faster on most small sets;
+  - `http_headers` misses show its risk at 0.10 mispredicts per lookup, even on these mostly unrelated misses.
+
+  PtHash sets ignore the option. In the first of two runs, `random3000` mixed measured 8.98 ns for the default, a one-off disturbance; the second run (below) gave 7.10.
+
 **Remaining gaps:**
 - Sets with a wide key-length range (`http_headers`, 2-28 bytes) need many loads. A cheaper representation could help.
 - A branch-free lookup variant could help unpredictable streams.
@@ -46,7 +52,7 @@ taskset -c 4 target/release/report
 
 # pickmap benchmarks
 
-- Date: 2026-10-30T12:02:50+01:00
+- Date: 2026-10-30T12:13:40+01:00
 - CPU: AMD Ryzen Threadripper PRO 9975WX 32-Cores (ran on cpu 4)
 - Governor: performance
 - Boost: 1
@@ -60,109 +66,118 @@ taskset -c 4 target/release/report
 
 | competitor | hit | miss | mixed |
 |---|---|---|---|
-| pickmap | 2.00 (0.00) | 1.79 (0.00) | 5.63 (0.50) |
-| lemire-cpp | 1.01 (0.00) | 0.85 (0.01) | 4.64 (0.51) |
-| quickphf | 12.77 (1.01) | 14.36 (1.32) | 17.41 (1.45) |
-| match | 10.16 (1.24) | 6.83 (0.88) | 10.98 (1.41) |
-| phf | 12.86 (0.94) | 16.27 (1.56) | 18.01 (1.54) |
-| frozen-collections | 8.68 (0.69) | 9.28 (0.86) | 12.02 (1.10) |
-| hashmap-foldhash | 4.71 (0.23) | 6.05 (0.59) | 9.11 (0.78) |
+| pickmap | 2.03 (0.00) | 1.79 (0.00) | 5.65 (0.50) |
+| pickmap-keyword-scan | 1.91 (0.00) | 1.54 (0.00) | 5.25 (0.50) |
+| lemire-cpp | 1.07 (0.00) | 0.85 (0.01) | 4.61 (0.51) |
+| quickphf | 12.92 (1.01) | 14.46 (1.33) | 17.34 (1.45) |
+| match | 10.07 (1.24) | 6.69 (0.87) | 10.85 (1.41) |
+| phf | 12.68 (0.94) | 16.15 (1.54) | 18.02 (1.53) |
+| frozen-collections | 9.11 (0.69) | 9.55 (0.86) | 12.34 (1.10) |
+| hashmap-foldhash | 4.74 (0.23) | 6.03 (0.59) | 9.04 (0.78) |
 
 ### http_headers
 
 | competitor | hit | miss | mixed |
 |---|---|---|---|
-| pickmap | 3.74 (0.00) | 3.58 (0.00) | 7.49 (0.50) |
-| lemire-cpp | 1.82 (0.01) | 1.78 (0.03) | 6.45 (0.53) |
-| quickphf | 14.22 (1.45) | 14.52 (1.57) | 19.82 (1.93) |
-| match | 13.49 (1.64) | 9.01 (0.96) | 12.78 (1.53) |
-| phf | 16.07 (1.74) | 17.03 (2.02) | 21.29 (2.29) |
-| frozen-collections | 10.46 (1.10) | 11.76 (1.59) | 13.68 (1.71) |
-| hashmap-foldhash | 7.38 (0.69) | 13.22 (1.52) | 14.09 (1.58) |
+| pickmap | 3.75 (0.00) | 3.58 (0.00) | 7.38 (0.50) |
+| pickmap-keyword-scan | 3.47 (0.00) | 3.53 (0.10) | 7.06 (0.53) |
+| lemire-cpp | 1.84 (0.01) | 1.77 (0.03) | 7.07 (0.65) |
+| quickphf | 14.34 (1.46) | 14.66 (1.57) | 19.98 (1.94) |
+| match | 13.52 (1.64) | 9.02 (0.95) | 12.73 (1.52) |
+| phf | 16.02 (1.74) | 17.03 (2.02) | 21.39 (2.30) |
+| frozen-collections | 10.28 (1.10) | 11.63 (1.60) | 13.64 (1.70) |
+| hashmap-foldhash | 7.40 (0.69) | 13.22 (1.52) | 14.12 (1.58) |
 
 ### rust_keywords
 
 | competitor | hit | miss | mixed |
 |---|---|---|---|
-| pickmap | 2.57 (0.00) | 2.34 (0.00) | 6.37 (0.50) |
-| lemire-cpp | 1.72 (0.10) | 1.66 (0.14) | 5.48 (0.62) |
-| quickphf | 10.43 (0.84) | 13.28 (1.22) | 16.38 (1.37) |
-| match | 17.22 (1.78) | 12.24 (0.89) | 15.31 (1.42) |
-| phf | 13.00 (0.91) | 15.89 (1.52) | 18.67 (1.57) |
-| frozen-collections | 4.03 (0.39) | 4.10 (0.57) | 8.04 (0.92) |
-| hashmap-foldhash | 6.05 (0.43) | 6.58 (0.67) | 10.41 (0.99) |
+| pickmap | 2.50 (0.00) | 2.34 (0.00) | 6.45 (0.50) |
+| pickmap-keyword-scan | 2.44 (0.00) | 2.17 (0.00) | 6.17 (0.50) |
+| lemire-cpp | 1.76 (0.10) | 1.65 (0.14) | 5.45 (0.62) |
+| quickphf | 10.48 (0.84) | 13.27 (1.23) | 16.47 (1.36) |
+| match | 17.01 (1.76) | 12.46 (0.89) | 15.54 (1.43) |
+| phf | 12.65 (0.90) | 15.78 (1.53) | 18.42 (1.57) |
+| frozen-collections | 4.32 (0.39) | 4.52 (0.58) | 8.15 (0.92) |
+| hashmap-foldhash | 5.98 (0.43) | 6.58 (0.68) | 10.40 (0.99) |
 
 ### random1000
 
 | competitor | hit | miss | mixed |
 |---|---|---|---|
-| pickmap | 2.38 (0.00) | 1.92 (0.00) | 6.53 (0.50) |
-| lemire-cpp | 1.58 (0.00) | 1.45 (0.02) | 6.42 (0.51) |
-| quickphf | 13.37 (1.32) | 14.35 (1.49) | 19.79 (1.84) |
-| match | 70.20 (2.02) | 94.25 (1.02) | 83.21 (1.58) |
-| phf | 15.02 (1.45) | 16.08 (1.72) | 20.94 (2.02) |
-| frozen-collections | 8.09 (0.57) | 10.86 (1.20) | 14.19 (1.46) |
-| hashmap-foldhash | 5.86 (0.47) | 5.81 (0.64) | 10.41 (1.03) |
+| pickmap | 2.39 (0.00) | 1.94 (0.00) | 6.60 (0.50) |
+| pickmap-keyword-scan | 2.38 (0.00) | 1.94 (0.00) | 6.61 (0.50) |
+| lemire-cpp | 1.58 (0.00) | 1.47 (0.02) | 6.54 (0.51) |
+| quickphf | 13.58 (1.32) | 14.50 (1.49) | 20.14 (1.84) |
+| match | 70.07 (2.02) | 94.34 (0.97) | 82.99 (1.52) |
+| phf | 15.00 (1.45) | 16.12 (1.72) | 20.67 (2.02) |
+| frozen-collections | 7.82 (0.57) | 10.88 (1.20) | 13.84 (1.46) |
+| hashmap-foldhash | 5.88 (0.47) | 5.80 (0.64) | 10.40 (1.03) |
 
 ### url_schemes
 
 | competitor | hit | miss | mixed |
 |---|---|---|---|
-| pickmap | 2.30 (0.00) | 2.06 (0.00) | 5.89 (0.50) |
-| lemire-cpp | 1.17 (0.00) | 1.09 (0.01) | 5.29 (0.51) |
-| quickphf | 10.90 (0.87) | 14.04 (1.34) | 16.45 (1.42) |
-| match | 9.99 (1.30) | 7.07 (0.86) | 10.59 (1.36) |
-| phf | 12.50 (0.79) | 15.81 (1.49) | 18.22 (1.50) |
-| frozen-collections | 8.57 (0.78) | 10.66 (1.39) | 12.09 (1.40) |
-| hashmap-foldhash | 5.77 (0.45) | 7.00 (0.75) | 10.34 (1.02) |
+| pickmap | 2.30 (0.00) | 2.06 (0.00) | 5.90 (0.50) |
+| pickmap-keyword-scan | 2.04 (0.00) | 1.59 (0.01) | 5.47 (0.51) |
+| lemire-cpp | 1.15 (0.00) | 1.07 (0.01) | 5.74 (0.56) |
+| quickphf | 11.16 (0.88) | 14.13 (1.35) | 16.59 (1.42) |
+| match | 10.06 (1.31) | 7.13 (0.86) | 10.63 (1.36) |
+| phf | 12.29 (0.80) | 15.72 (1.49) | 18.04 (1.50) |
+| frozen-collections | 8.47 (0.78) | 10.98 (1.39) | 12.04 (1.38) |
+| hashmap-foldhash | 5.68 (0.45) | 6.95 (0.75) | 10.29 (1.02) |
 
 ### js_reserved
 
 | competitor | hit | miss | mixed |
 |---|---|---|---|
-| pickmap | 2.38 (0.00) | 2.20 (0.00) | 6.12 (0.50) |
-| lemire-cpp | 1.32 (0.00) | 1.31 (0.04) | 6.03 (0.59) |
-| quickphf | 11.20 (0.94) | 12.99 (1.24) | 17.35 (1.48) |
-| match | 15.11 (1.75) | 10.79 (0.91) | 13.94 (1.47) |
-| phf | 13.73 (1.11) | 15.83 (1.57) | 19.48 (1.74) |
-| frozen-collections | 7.49 (0.64) | 10.36 (1.29) | 11.61 (1.34) |
-| hashmap-foldhash | 5.16 (0.34) | 6.57 (0.67) | 9.98 (0.94) |
+| pickmap | 2.39 (0.00) | 2.20 (0.00) | 6.03 (0.50) |
+| pickmap-keyword-scan | 2.16 (0.00) | 1.83 (0.01) | 5.95 (0.50) |
+| lemire-cpp | 1.34 (0.00) | 1.30 (0.04) | 5.65 (0.52) |
+| quickphf | 11.17 (0.94) | 13.01 (1.25) | 17.48 (1.48) |
+| match | 14.89 (1.74) | 9.92 (0.91) | 13.27 (1.46) |
+| phf | 13.35 (1.11) | 15.69 (1.57) | 19.16 (1.74) |
+| frozen-collections | 7.28 (0.63) | 9.94 (1.29) | 11.35 (1.35) |
+| hashmap-foldhash | 5.16 (0.34) | 6.56 (0.67) | 10.00 (0.94) |
 
 ### tickers100
 
 | competitor | hit | miss | mixed |
 |---|---|---|---|
-| pickmap | 2.45 (0.00) | 2.17 (0.00) | 6.67 (0.50) |
-| lemire-cpp | 1.70 (0.00) | 1.53 (0.02) | 5.41 (0.51) |
-| quickphf | 9.56 (0.66) | 13.45 (1.21) | 15.46 (1.25) |
-| match | 23.75 (1.70) | 19.86 (0.84) | 22.25 (1.38) |
-| phf | 11.80 (0.59) | 16.11 (1.42) | 17.30 (1.31) |
-| frozen-collections | 8.32 (0.71) | 10.96 (1.43) | 11.98 (1.40) |
-| hashmap-foldhash | 5.49 (0.35) | 8.56 (0.89) | 10.74 (1.03) |
+| pickmap | 2.48 (0.00) | 2.17 (0.00) | 6.64 (0.50) |
+| pickmap-keyword-scan | 2.47 (0.00) | 2.17 (0.00) | 6.64 (0.50) |
+| lemire-cpp | 1.68 (0.00) | 1.53 (0.02) | 5.44 (0.51) |
+| quickphf | 9.48 (0.67) | 13.67 (1.22) | 15.59 (1.25) |
+| match | 24.10 (1.71) | 20.58 (0.92) | 22.67 (1.40) |
+| phf | 11.85 (0.59) | 16.15 (1.43) | 17.47 (1.31) |
+| frozen-collections | 8.52 (0.71) | 11.12 (1.43) | 12.40 (1.42) |
+| hashmap-foldhash | 5.49 (0.35) | 8.38 (0.89) | 10.52 (1.02) |
 
 ### random3000
 
 | competitor | hit | miss | mixed |
 |---|---|---|---|
-| pickmap | 2.74 (0.00) | 2.03 (0.00) | 7.01 (0.50) |
-| lemire-cpp | 1.68 (0.00) | 1.48 (0.01) | 6.60 (0.50) |
-| quickphf | 13.37 (1.32) | 14.59 (1.49) | 20.26 (1.84) |
-| match | 189.67 (2.05) | 290.19 (1.09) | 241.08 (1.57) |
-| phf | 15.60 (1.48) | 16.28 (1.74) | 21.46 (2.04) |
-| frozen-collections | 6.93 (0.39) | 9.69 (1.01) | 12.79 (1.30) |
-| hashmap-foldhash | 6.31 (0.51) | 8.00 (0.87) | 11.52 (1.16) |
+| pickmap | 2.75 (0.00) | 2.04 (0.00) | 7.10 (0.50) |
+| pickmap-keyword-scan | 2.75 (0.00) | 2.03 (0.00) | 7.01 (0.51) |
+| lemire-cpp | 1.70 (0.00) | 1.52 (0.01) | 7.37 (0.51) |
+| quickphf | 13.67 (1.32) | 14.80 (1.50) | 20.31 (1.82) |
+| match | 190.79 (2.07) | 291.86 (0.98) | 244.14 (1.70) |
+| phf | 15.78 (1.48) | 16.30 (1.74) | 21.58 (2.04) |
+| frozen-collections | 7.14 (0.39) | 9.93 (1.01) | 13.37 (1.29) |
+| hashmap-foldhash | 6.37 (0.51) | 7.94 (0.87) | 11.52 (1.15) |
 
 ### hard_prefix
 
 | competitor | hit | miss | mixed |
 |---|---|---|---|
-| pickmap | 2.92 (0.00) | 2.29 (0.00) | 6.80 (0.50) |
-| lemire-cpp | 3.61 (0.00) | 6.73 (0.40) | 8.39 (0.54) |
-| quickphf | 8.71 (0.02) | 12.01 (1.03) | 13.25 (0.74) |
-| match | 270.82 (2.43) | 198.19 (1.11) | 238.39 (1.98) |
-| phf | 13.50 (0.00) | 14.83 (1.04) | 16.46 (0.71) |
-| frozen-collections | 9.38 (0.53) | 11.05 (1.21) | 13.61 (1.22) |
-| hashmap-foldhash | 4.87 (0.00) | 5.43 (0.48) | 9.12 (0.64) |
+| pickmap | 2.82 (0.00) | 2.27 (0.00) | 6.78 (0.50) |
+| pickmap-keyword-scan | 2.81 (0.00) | 2.27 (0.00) | 6.79 (0.50) |
+| lemire-cpp | 3.61 (0.00) | 6.61 (0.41) | 8.26 (0.53) |
+| quickphf | 8.59 (0.02) | 12.29 (1.03) | 13.41 (0.74) |
+| match | 257.32 (1.18) | 189.56 (0.39) | 227.84 (1.14) |
+| phf | 13.35 (0.00) | 14.77 (1.04) | 16.59 (0.70) |
+| frozen-collections | 9.37 (0.52) | 11.11 (1.20) | 13.63 (1.22) |
+| hashmap-foldhash | 4.64 (0.00) | 5.45 (0.47) | 9.08 (0.63) |
 
 ## Flags
 
@@ -172,10 +187,10 @@ None.
 
 | set | pickmap hit | spike hit | ratio | pickmap miss | spike miss | ratio |
 |---|---|---|---|---|---|---|
-| http_methods | 2.00 | 1.75 | **1.14** | 1.79 | 1.77 | 1.01 |
-| http_headers | 3.74 | 3.44 | 1.09 | 3.58 | 3.46 | 1.04 |
-| rust_keywords | 2.57 | 2.36 | 1.09 | 2.34 | 2.33 | 1.01 |
-| random1000 | 2.38 | 2.01 | **1.18** | 1.92 | 1.66 | **1.15** |
+| http_methods | 2.03 | 1.75 | **1.16** | 1.79 | 1.77 | 1.01 |
+| http_headers | 3.75 | 3.44 | 1.09 | 3.58 | 3.46 | 1.03 |
+| rust_keywords | 2.50 | 2.36 | 1.06 | 2.34 | 2.33 | 1.01 |
+| random1000 | 2.39 | 2.01 | **1.19** | 1.94 | 1.66 | **1.17** |
 
 ## Summary per workload
 
@@ -185,41 +200,41 @@ None.
 
 | set | pickmap | best rival | speedup | pickmap / lemire |
 |---|---|---|---|---|
-| http_methods | 2.00 | 8.68 | 4.34x | 1.97 |
-| http_headers | 3.74 | 10.46 | 2.79x | 2.06 |
-| rust_keywords | 2.57 | 4.03 | 1.57x | 1.49 |
-| random1000 | 2.38 | 8.09 | 3.40x | 1.51 |
-| url_schemes | 2.30 | 8.57 | 3.72x | 1.98 |
-| js_reserved | 2.38 | 7.49 | 3.14x | 1.80 |
-| tickers100 | 2.45 | 8.32 | 3.39x | 1.44 |
-| random3000 | 2.74 | 6.93 | 2.53x | 1.64 |
-| hard_prefix | 2.92 | 8.71 | 2.98x | 0.81 |
+| http_methods | 2.03 | 9.11 | 4.49x | 1.90 |
+| http_headers | 3.75 | 10.28 | 2.74x | 2.04 |
+| rust_keywords | 2.50 | 4.32 | 1.73x | 1.42 |
+| random1000 | 2.39 | 7.82 | 3.28x | 1.51 |
+| url_schemes | 2.30 | 8.47 | 3.68x | 2.01 |
+| js_reserved | 2.39 | 7.28 | 3.05x | 1.79 |
+| tickers100 | 2.48 | 8.52 | 3.44x | 1.47 |
+| random3000 | 2.75 | 7.14 | 2.60x | 1.62 |
+| hard_prefix | 2.82 | 8.59 | 3.05x | 0.78 |
 
 ### Miss
 
 | set | pickmap | best rival | speedup | pickmap / lemire |
 |---|---|---|---|---|
-| http_methods | 1.79 | 9.28 | 5.17x | 2.12 |
-| http_headers | 3.58 | 11.76 | 3.28x | 2.01 |
-| rust_keywords | 2.34 | 4.10 | 1.75x | 1.41 |
-| random1000 | 1.92 | 10.86 | 5.67x | 1.33 |
-| url_schemes | 2.06 | 10.66 | 5.16x | 1.90 |
-| js_reserved | 2.20 | 10.36 | 4.70x | 1.68 |
-| tickers100 | 2.17 | 10.96 | 5.06x | 1.42 |
-| random3000 | 2.03 | 9.69 | 4.77x | 1.37 |
-| hard_prefix | 2.29 | 11.05 | 4.81x | 0.34 |
+| http_methods | 1.79 | 9.55 | 5.33x | 2.11 |
+| http_headers | 3.58 | 11.63 | 3.25x | 2.03 |
+| rust_keywords | 2.34 | 4.52 | 1.93x | 1.42 |
+| random1000 | 1.94 | 10.88 | 5.59x | 1.32 |
+| url_schemes | 2.06 | 10.98 | 5.33x | 1.93 |
+| js_reserved | 2.20 | 9.94 | 4.52x | 1.69 |
+| tickers100 | 2.17 | 11.12 | 5.13x | 1.42 |
+| random3000 | 2.04 | 9.93 | 4.86x | 1.34 |
+| hard_prefix | 2.27 | 11.11 | 4.89x | 0.34 |
 
 ### Mixed
 
 | set | pickmap | best rival | speedup | pickmap / lemire |
 |---|---|---|---|---|
-| http_methods | 5.63 | 12.02 | 2.14x | 1.21 |
-| http_headers | 7.49 | 13.68 | 1.83x | 1.16 |
-| rust_keywords | 6.37 | 8.04 | 1.26x | 1.16 |
-| random1000 | 6.53 | 14.19 | 2.17x | 1.02 |
-| url_schemes | 5.89 | 12.09 | 2.05x | 1.11 |
-| js_reserved | 6.12 | 11.61 | 1.90x | 1.02 |
-| tickers100 | 6.67 | 11.98 | 1.80x | 1.23 |
-| random3000 | 7.01 | 12.79 | 1.83x | 1.06 |
-| hard_prefix | 6.80 | 13.25 | 1.95x | 0.81 |
+| http_methods | 5.65 | 12.34 | 2.18x | 1.22 |
+| http_headers | 7.38 | 13.64 | 1.85x | 1.04 |
+| rust_keywords | 6.45 | 8.15 | 1.26x | 1.18 |
+| random1000 | 6.60 | 13.84 | 2.10x | 1.01 |
+| url_schemes | 5.90 | 12.04 | 2.04x | 1.03 |
+| js_reserved | 6.03 | 11.35 | 1.88x | 1.07 |
+| tickers100 | 6.64 | 12.40 | 1.87x | 1.22 |
+| random3000 | 7.10 | 13.37 | 1.88x | 0.96 |
+| hard_prefix | 6.78 | 13.41 | 1.98x | 0.82 |
 
