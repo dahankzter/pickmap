@@ -1,0 +1,15 @@
+[package]
+name = "pickmap-gen"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Code generator behind pickmap's static_map! macro."
+
+[dependencies]
+pickmap-core = { path = "../pickmap-core" }
+proc-macro2 = "1"
+quote = "1"
+litrs = "1"
+
+[dev-dependencies]
+keysets = { path = "../keysets" }
