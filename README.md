@@ -19,10 +19,12 @@ static_map! {
     "DELETE" => Method::Delete,
 }
 
-assert_eq!(METHODS.get("POST"), Some(&Method::Post));
-assert!(!METHODS.contains_key("PATCH"));
-assert_eq!(METHODS.len(), 4);
-for (key, value) in METHODS.iter() { /* declaration order */ }
+fn main() {
+    assert_eq!(METHODS.get("POST"), Some(&Method::Post));
+    assert!(!METHODS.contains_key("PATCH"));
+    assert_eq!(METHODS.len(), 4);
+    for (key, value) in METHODS.iter() { /* declaration order */ }
+}
 ```
 
 ## API
