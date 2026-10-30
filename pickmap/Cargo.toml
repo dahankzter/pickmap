@@ -12,8 +12,8 @@ keywords = ["perfect-hash", "static", "map", "phf", "lookup"]
 categories = ["data-structures", "no-std", "no-std::no-alloc", "algorithms"]
 
 [dependencies]
-pickmap-core = { path = "../pickmap-core", version = "0.1.0" }
-pickmap-macros = { path = "../pickmap-macros", version = "0.1.0" }
+pickmap-core = { path = "../pickmap-core", version = "=0.2.0" }
+pickmap-macros = { path = "../pickmap-macros", version = "=0.2.0" }
 
 [dev-dependencies]
 trybuild = "1"

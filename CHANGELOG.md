@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - `get_in(buf, range)`: looks up the key at `buf[range]`, as `get(&buf[range])` would,
   but reads it with one wide load from `buf` masked to the key's length, which is safe
@@ -9,6 +9,9 @@
   the `StaticMap` trait, with a default that calls `get`.
 - Maps generate `get_in`'s tables inside `get_in` itself, so programs that don't call it
   don't carry them.
+- The internal crates (`pickmap-core`, `pickmap-gen`, `pickmap-macros`) are now pinned to
+  the exact same version, so a `cargo update` can't mix a newer macro with an older
+  runtime.
 
 ## 0.1.0
 
