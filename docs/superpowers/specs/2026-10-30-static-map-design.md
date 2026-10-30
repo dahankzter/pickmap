@@ -102,11 +102,14 @@ The spike (`spike/round3`, `docs/spike-results.md` there) measured every choice 
 
 ### Crate layout
 
-Three crates in one Cargo workspace, plus the kept benchmark crates:
+Four crates in one Cargo workspace, plus the kept benchmark crates:
 
-1. **Generator** (plain library, no proc-macro dependency). Takes the keys, picks a key representation and a hash strategy, builds the tables, and emits Rust tokens. Testable as ordinary code. Later it can be reused from `build.rs` and as the basis for runtime freeze.
-2. **Proc macro** (thin). Parses the macro input, calls the generator, and reports errors with good spans.
-3. **Runtime** (`no_std`, tiny). The `StaticMap` trait, the shared load, hash and compare helpers that generated code calls, and a re-export of the macro. This is the crate users depend on.
+1. **Core** (`pickmap-core`, `no_std`). The load, hash and slot primitives. Both the generator (at build time) and generated code (at run time) call these, so the two can't drift apart.
+2. **Generator** (`pickmap-gen`, plain library, no proc-macro dependency). Parses the input, picks a key representation and a hash strategy, builds the tables, and emits Rust tokens. Testable as ordinary code. Later it can be reused from `build.rs` and as the basis for runtime freeze.
+3. **Proc macro** (`pickmap-macros`, thin). Calls the generator and reports errors with good spans.
+4. **Runtime facade** (`pickmap`, `no_std`, tiny). The `StaticMap` trait, the iterator, a re-export of the macro, and the core under a hidden `__private` module. This is the crate users depend on.
+
+Core is separate from the facade because the generator needs the primitives and the facade re-exports the macro; one crate holding both would be a dependency cycle.
 4. **`keysets` and `bench`**: carried over from the spike, with the spike-only crate dropped. `bench` gains a `pickmap` competitor that uses the real macro.
 
 ### Key representation (chosen per set at build time)
@@ -149,7 +152,7 @@ Empty slots carry a length no input can have.
   - it sinks a `pure` asm block.
 
   What held is an **optimization barrier**: an empty, non-`pure` `asm!` block that takes and returns a register value, touches no memory and emits no instructions. This is the constant-time-code technique. It is allowed in the runtime crate, with a `// SAFETY:` comment, and compiled out under Miri.
-- A **codegen test** guards this: it builds a fixed benchmark-style loop over a generated map and counts conditional jumps in it. The test fails when a data-dependent branch appears.
+- A **branch-miss guard** protects this. It runs every benchmark key set through a lookup loop on shuffled hit-only and miss-only streams, reads hardware branch-miss counters, and fails above 0.03 misses per lookup. Measuring behavior is sturdier than counting jumps in disassembly, which also contains harmless loop and bounds-check branches.
 - SIMD is not used. Every load lands in general registers, and the spike found no need for it.
 
 ## Testing
@@ -158,7 +161,7 @@ Empty slots carry a length no input can have.
 - Property tests: random key sets of many sizes and shapes (shared prefixes, shared suffixes, all same length, very long keys, empty string, non-ASCII UTF-8). Every key must be found with the right value, and random non-keys must return `None`. Compare against `std::collections::HashMap` as the reference.
 - Compile-fail tests (for example with `trybuild`) for duplicate keys, non-string keys and a malformed header.
 - Miri on the runtime's load and lookup code, over exact-length allocations of every length 0..=40.
-- The codegen test (see "Table layout and lookup").
+- The branch-miss guard (see "Table layout and lookup").
 - Tests for every representation: key values are exact (any byte change alters them) for every length a class or signature covers.
 
 ## Benchmarks
