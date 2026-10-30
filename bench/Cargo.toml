@@ -11,6 +11,9 @@ quickphf = "0.1"
 phf = "0.14"
 frozen-collections = "0.9.3"
 foldhash = "0.2"
+
+# Branch-miss counters: Linux perf events only. Elsewhere the report shows them as n/a.
+[target.'cfg(target_os = "linux")'.dependencies]
 perf-event2 = "0.7"
 
 [build-dependencies]

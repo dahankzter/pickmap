@@ -91,6 +91,25 @@ Planning a map stays well under a second without profile tweaks. In an unoptimiz
   so on streams that mix long and short inputs, those maps mispredict about 0.3-0.5
   times per lookup (the `long_paths` benchmark set).
 
+## Platforms
+
+- `no_std`, with no allocation. It builds for bare-metal targets such as `thumbv7m-none-eabi`.
+- The optimization barrier (see Safety) is an `asm!` block on x86_64 and aarch64; other
+  targets, such as `wasm32`, get a plain function. Lookups are correct everywhere; only
+  the branch-free guarantee needs the barrier.
+- Builds have been checked for x86_64 Linux, aarch64 Linux, aarch64 macOS, `wasm32` and
+  `thumbv7m`. The test suite and benchmarks have so far run on x86_64 (AMD Zen 5) only.
+
+To benchmark on another machine, such as an Apple Silicon Mac:
+
+```sh
+cargo run -p bench --release --bin report > BENCHMARKS-<machine>.md
+```
+
+Branch-miss counts need Linux perf events, so elsewhere they show as unavailable, and
+the branch-miss guard test only exists on Linux. On Linux, pin to one core with
+`taskset -c 4`.
+
 ## Safety
 
 `pickmap` never reads outside the key you pass in. Short inputs read a static zero

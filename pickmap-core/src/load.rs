@@ -18,14 +18,22 @@ pub const HUGE: u8 = 8; // 17..=32 bytes, 4 loads (needs WORDS == 4)
 /// so it can't turn the surrounding branch-free code back into branches. An empty asm
 /// block, as constant-time code uses; it emits no instructions. Not `pure`, so LLVM
 /// can't sink it into a branch either.
+#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(miri)))]
 #[inline(always)]
 pub fn opaque(mut x: u64) -> u64 {
-    #[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(miri)))]
     // SAFETY: the asm is empty: it reads and writes only the register holding `x`, and
     // touches no memory.
     unsafe {
         core::arch::asm!("/* {0} */", inout(reg) x, options(nomem, nostack, preserves_flags));
     }
+    x
+}
+
+/// Other targets and Miri: a plain identity. Correct everywhere, but LLVM may then turn
+/// the branch-free code back into branches.
+#[cfg(not(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(miri))))]
+#[inline(always)]
+pub fn opaque(x: u64) -> u64 {
     x
 }
 

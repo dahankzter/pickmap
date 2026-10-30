@@ -8,6 +8,8 @@
 //!
 //! Without hardware counters (a container, a VM, `perf_event_paranoid`) the guard fails
 //! rather than passing unmeasured. Set `PICKMAP_NO_PERF_COUNTERS=1` to skip it on purpose.
+//! It uses Linux perf events, so it only exists on Linux.
+#![cfg(target_os = "linux")]
 
 use bench::{batch, cases};
 use keysets::{SplitMix64, Workload};

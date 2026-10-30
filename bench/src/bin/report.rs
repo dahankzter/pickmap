@@ -12,8 +12,6 @@ use std::time::Instant;
 
 use bench::{Batch, Case, batch, cases};
 use keysets::{QUERY_COUNT, SplitMix64, WORKLOADS, Workload};
-use perf_event::Builder;
-use perf_event::events::Hardware;
 
 const SAMPLES: usize = 101;
 const SUSPICIOUS_NS: f64 = 0.3;
@@ -36,6 +34,46 @@ const SPIKE_BASELINE: [(&str, f64, f64); 4] = [
     ("rust_keywords", 2.36, 2.33),
     ("random1000", 2.01, 1.66),
 ];
+
+/// Hardware branch-miss counter: Linux perf events, or nothing on other systems.
+#[cfg(target_os = "linux")]
+struct MissCounter(Option<perf_event::Counter>);
+
+#[cfg(target_os = "linux")]
+impl MissCounter {
+    fn new() -> Self {
+        MissCounter(perf_event::Builder::new(perf_event::events::Hardware::BRANCH_MISSES).build().ok())
+    }
+
+    fn start(&mut self) {
+        if let Some(c) = self.0.as_mut() {
+            let _ = c.reset();
+            let _ = c.enable();
+        }
+    }
+
+    fn stop(&mut self) -> Option<u64> {
+        let c = self.0.as_mut()?;
+        let _ = c.disable();
+        c.read().ok()
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+struct MissCounter;
+
+#[cfg(not(target_os = "linux"))]
+impl MissCounter {
+    fn new() -> Self {
+        MissCounter
+    }
+
+    fn start(&mut self) {}
+
+    fn stop(&mut self) -> Option<u64> {
+        None
+    }
+}
 
 /// (ns per lookup, branch misses per lookup), medians over samples.
 type Results = HashMap<(&'static str, &'static str, Workload), (f64, Option<f64>)>;
@@ -78,7 +116,7 @@ fn header() {
 
 fn measure(set: &keysets::KeySet, w: Workload, cases: &[&Case], rng: &mut SplitMix64, results: &mut Results) {
     let base = batch(set, w);
-    let mut counter = Builder::new(Hardware::BRANCH_MISSES).build().ok();
+    let mut counter = MissCounter::new();
     let mut ns: Vec<Vec<f64>> = vec![Vec::new(); cases.len()];
     let mut misses: Vec<Vec<f64>> = vec![Vec::new(); cases.len()];
     for sample in 0..SAMPLES {
@@ -87,18 +125,12 @@ fn measure(set: &keysets::KeySet, w: Workload, cases: &[&Case], rng: &mut SplitM
             let i = (sample + k) % cases.len();
             let (warm, timed): (Batch, Batch) = (base.shuffled(rng), base.shuffled(rng));
             black_box((cases[i].tput)(black_box(&warm)));
-            if let Some(c) = counter.as_mut() {
-                let _ = c.reset();
-                let _ = c.enable();
-            }
+            counter.start();
             let t = Instant::now();
             black_box((cases[i].tput)(black_box(&timed)));
             let dt = t.elapsed();
-            if let Some(c) = counter.as_mut() {
-                let _ = c.disable();
-                if let Ok(m) = c.read() {
-                    misses[i].push(m as f64 / QUERY_COUNT as f64);
-                }
+            if let Some(m) = counter.stop() {
+                misses[i].push(m as f64 / QUERY_COUNT as f64);
             }
             ns[i].push(dt.as_nanos() as f64 / QUERY_COUNT as f64);
         }
