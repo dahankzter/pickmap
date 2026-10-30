@@ -1,12 +1,17 @@
 [package]
 name = "pickmap-gen"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
-publish.workspace = true
-description = "Code generator behind pickmap's static_map! macro."
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Internal to pickmap: parses static_map! input, searches for a perfect hash and emits the lookup."
+documentation = "https://docs.rs/pickmap"
+keywords = ["perfect-hash"]
+categories = ["development-tools::procedural-macro-helpers"]
 
 [dependencies]
-pickmap-core = { path = "../pickmap-core" }
+pickmap-core = { path = "../pickmap-core", version = "0.1.0" }
 proc-macro2 = "1"
 quote = "1"
 litrs = { version = "1", features = ["proc-macro2"] }

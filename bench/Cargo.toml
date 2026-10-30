@@ -2,7 +2,7 @@
 name = "bench"
 version = "0.0.0"
 edition.workspace = true
-publish.workspace = true
+publish = false
 
 [dependencies]
 keysets = { path = "../keysets" }

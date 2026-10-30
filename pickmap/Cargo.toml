@@ -1,13 +1,19 @@
 [package]
 name = "pickmap"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
-publish.workspace = true
-description = "Compile-time perfect-hash string maps: static_map! generates a branch-free lookup for each key set."
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fast, immutable string maps built at compile time: static_map! generates a perfect-hash lookup for each key set that never mispredicts on near-misses."
+documentation = "https://docs.rs/pickmap"
+readme = "../README.md"
+keywords = ["perfect-hash", "static", "map", "phf", "lookup"]
+categories = ["data-structures", "no-std", "no-std::no-alloc", "algorithms"]
 
 [dependencies]
-pickmap-core = { path = "../pickmap-core" }
-pickmap-macros = { path = "../pickmap-macros" }
+pickmap-core = { path = "../pickmap-core", version = "0.1.0" }
+pickmap-macros = { path = "../pickmap-macros", version = "0.1.0" }
 
 [dev-dependencies]
 trybuild = "1"

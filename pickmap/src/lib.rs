@@ -1,8 +1,55 @@
-//! Compile-time perfect-hash string maps.
+//! Fast, immutable string maps built at compile time.
 //!
-//! `static_map!` analyzes a map's keys at build time and generates a lookup specialized
-//! to them: a perfect hash over a few picked bytes (or a PtHash fallback), and a key
-//! compare free of data-dependent branches.
+//! [`static_map!`] looks at a map's keys while your crate compiles and generates a lookup
+//! made for exactly those keys: a perfect hash over a few chosen bytes for small maps, or
+//! a PtHash table for large ones. The result is a plain `static`: no allocation, `no_std`,
+//! and lookups that don't slow down on inputs that nearly match a key.
+//!
+//! ```
+//! use pickmap::{StaticMap, static_map};
+//!
+//! #[derive(Debug, PartialEq)]
+//! pub enum Method { Get, Post, Put, Delete }
+//!
+//! static_map! {
+//!     /// HTTP methods we handle.
+//!     pub METHODS: Method;
+//!     "GET" => Method::Get,
+//!     "POST" => Method::Post,
+//!     "PUT" => Method::Put,
+//!     "DELETE" => Method::Delete,
+//! }
+//!
+//! assert_eq!(METHODS.get("POST"), Some(&Method::Post));
+//! assert_eq!(METHODS.get("PATCH"), None);
+//! assert_eq!(METHODS.iter().map(|(k, _)| k).collect::<Vec<_>>(), ["GET", "POST", "PUT", "DELETE"]);
+//!
+//! // Generic code works through the StaticMap trait.
+//! fn count<M: StaticMap>(map: &M) -> usize {
+//!     map.len()
+//! }
+//! assert_eq!(count(&METHODS), 4);
+//! ```
+//!
+//! # Syntax
+//!
+//! ```text
+//! static_map! { [attributes] [vis] NAME: ValueType; "key" => value, ... }
+//! ```
+//!
+//! - Keys are string literals (escaped and raw strings work); duplicates are a compile
+//!   error.
+//! - Values are any expression valid in a `static` of `ValueType`, which must be `Sync`.
+//!   Elided lifetimes such as `&[u8]` are fine.
+//! - `///` docs and other attributes apply to the static; `#[cfg]` and `#[cfg_attr]`
+//!   apply to everything the macro generates.
+//! - `#[pickmap(workload = "general" | "keyword_scan" | "mostly_hits")]` is a performance
+//!   hint that never changes results. See the
+//!   [README](https://github.com/dahankzter/pickmap#workloads) before changing the
+//!   default.
+//!
+//! Benchmarks, design notes and limits are in the
+//! [repository](https://github.com/dahankzter/pickmap).
 #![no_std]
 
 mod iter;

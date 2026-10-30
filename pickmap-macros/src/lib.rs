@@ -1,3 +1,5 @@
+//! Internal to [pickmap](https://docs.rs/pickmap); depend on that crate instead.
+//!
 //! The `static_map!` proc macro. Use it through the `pickmap` crate.
 
 use proc_macro::TokenStream;

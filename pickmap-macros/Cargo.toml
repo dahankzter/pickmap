@@ -1,12 +1,17 @@
 [package]
 name = "pickmap-macros"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
-publish.workspace = true
-description = "The static_map! proc macro for pickmap."
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Internal to pickmap: the static_map! proc macro. Depend on pickmap instead."
+documentation = "https://docs.rs/pickmap"
+keywords = ["perfect-hash"]
+categories = ["development-tools::procedural-macro-helpers"]
 
 [lib]
 proc-macro = true
 
 [dependencies]
-pickmap-gen = { path = "../pickmap-gen" }
+pickmap-gen = { path = "../pickmap-gen", version = "0.1.0" }
