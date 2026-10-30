@@ -34,3 +34,16 @@ fn empty_rejects_u32_max_length() {
     assert_eq!(Slot::<1>::EMPTY.find(&[0], u32::MAX as usize), None);
     assert_eq!(Slot::<2>::EMPTY.find(&[0, 0], u32::MAX as usize), None);
 }
+
+#[test]
+fn empty_rejects_empty_input_values() {
+    use pickmap_core::load::{BIG, HUGE, MID, SMALL, key_value, signature};
+    // Every representation maps a zero-length input to all-zero words, which an
+    // empty slot's key never equals.
+    assert_eq!(key_value::<4, { SMALL | MID | BIG | HUGE }>(b""), [0; 4]);
+    assert_eq!(key_value::<1, 0>(b""), [0]);
+    assert_eq!(signature::<8, 4, 4>(b""), [0; 4]);
+    assert_eq!(signature::<1, 3, 1>(b""), [0]);
+    assert_eq!(Slot::<4>::EMPTY.find(&[0; 4], 0), None);
+    assert_eq!(Slot::<1>::EMPTY.find(&[u64::MAX], u32::MAX as usize), None);
+}

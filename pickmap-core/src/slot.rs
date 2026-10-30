@@ -1,10 +1,13 @@
 //! Table slots and the single combined compare.
 
 /// One table entry: the key's value (see [`crate::load`]), its length, and its index in
-/// declaration order. Empty slots have `len == u32::MAX`; input lengths are clamped below
-/// that, so no input matches an empty slot. Keys are shorter than [`MAX_KEY_LEN`].
+/// declaration order. Keys are at most [`MAX_KEY_LEN`] bytes.
+///
+/// Empty slots have length 0 and all-ones key words. Only a zero-length input has length
+/// 0, and every representation maps it to all-zero words, so no input matches an empty
+/// slot, with no extra work in [`Slot::find`].
 /// Longest supported key, in bytes.
-pub const MAX_KEY_LEN: usize = u32::MAX as usize - 2;
+pub const MAX_KEY_LEN: usize = u32::MAX as usize;
 
 #[repr(C)]
 pub struct Slot<const WORDS: usize> {
@@ -14,14 +17,12 @@ pub struct Slot<const WORDS: usize> {
 }
 
 impl<const WORDS: usize> Slot<WORDS> {
-    pub const EMPTY: Self = Slot { key: [0; WORDS], len: u32::MAX, idx: 0 };
+    pub const EMPTY: Self = Slot { key: [u64::MAX; WORDS], len: 0, idx: 0 };
 
     /// The key index if `v` and `n` are this slot's key. Length and every word are
     /// compared in one combined expression, so neither becomes a separate branch.
     #[inline(always)]
     pub fn find(&self, v: &[u64; WORDS], n: usize) -> Option<usize> {
-        // Clamped (branch-free) so even a 4 GiB input can't carry the empty-slot length.
-        let n = n.min(MAX_KEY_LEN + 1);
         let mut diff = self.len as u64 ^ n as u64;
         for i in 0..WORDS {
             diff |= self.key[i] ^ v[i];
