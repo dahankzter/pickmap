@@ -1,0 +1,12 @@
+[package]
+name = "pickmap-macros"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "The static_map! proc macro for pickmap."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+pickmap-gen = { path = "../pickmap-gen" }

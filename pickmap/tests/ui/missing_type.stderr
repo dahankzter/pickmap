@@ -1,0 +1,5 @@
+error: expected `:`
+ --> tests/ui/missing_type.rs:1:25
+  |
+1 | pickmap::static_map! { M; "a" => 1 }
+  |                         ^

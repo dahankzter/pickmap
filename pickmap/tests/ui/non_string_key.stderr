@@ -1,0 +1,5 @@
+error: keys must be string literals
+ --> tests/ui/non_string_key.rs:1:31
+  |
+1 | pickmap::static_map! { M: u8; 1 => 1 }
+  |                               ^

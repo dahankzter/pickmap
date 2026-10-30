@@ -1,0 +1,5 @@
+error: duplicate key "a"
+ --> tests/ui/duplicate_key.rs:1:41
+  |
+1 | pickmap::static_map! { M: u8; "a" => 1, "a" => 2 }
+  |                                         ^^^

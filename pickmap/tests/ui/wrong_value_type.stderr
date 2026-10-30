@@ -1,0 +1,5 @@
+error[E0308]: mismatched types
+ --> tests/ui/wrong_value_type.rs:1:38
+  |
+1 | pickmap::static_map! { M: u8; "a" => "x" }
+  |                                      ^^^ expected `u8`, found `&str`

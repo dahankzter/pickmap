@@ -7,3 +7,7 @@ description = "Compile-time perfect-hash string maps: static_map! generates a br
 
 [dependencies]
 pickmap-core = { path = "../pickmap-core" }
+pickmap-macros = { path = "../pickmap-macros" }
+
+[dev-dependencies]
+trybuild = "1"
