@@ -315,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "pickmap"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "pickmap-core",
  "pickmap-macros",
@@ -324,14 +324,14 @@ dependencies = [
 
 [[package]]
 name = "pickmap-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "keysets",
 ]
 
 [[package]]
 name = "pickmap-gen"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "keysets",
  "litrs",
@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "pickmap-macros"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "pickmap-gen",
 ]

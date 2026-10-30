@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - AVX-512: in builds compiled with AVX-512BW and AVX-512VL (e.g. `-C target-cpu=native` on
   Zen 4/5 or recent Intel), `get` and `get_in` read each key with one masked load that

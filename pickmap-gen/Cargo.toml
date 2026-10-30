@@ -11,7 +11,7 @@ keywords = ["perfect-hash"]
 categories = ["development-tools::procedural-macro-helpers"]
 
 [dependencies]
-pickmap-core = { path = "../pickmap-core", version = "=0.2.0" }
+pickmap-core = { path = "../pickmap-core", version = "=0.3.0" }
 proc-macro2 = "1"
 quote = "1"
 litrs = { version = "1", features = ["proc-macro2"] }
