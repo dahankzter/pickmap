@@ -1,0 +1,12 @@
+http
+https
+ws
+wss
+ftp
+file
+data
+mailto
+blob
+javascript
+about
+tel
