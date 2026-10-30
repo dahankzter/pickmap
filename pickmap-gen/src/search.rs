@@ -15,6 +15,8 @@ pub enum Strategy {
 }
 
 const STEP_BUDGET: usize = 200_000;
+/// Across all picked-byte attempts, before falling back to PtHash.
+const TOTAL_STEP_BUDGET: usize = 1_000_000;
 const MAX_POSITIONS: usize = 3;
 const PILOTS: u64 = 1 << 20;
 const SEEDS: u64 = 64;
@@ -80,16 +82,33 @@ fn search_picked(keys: &[&[u8]]) -> Option<Strategy> {
         return None;
     }
     let cands: Vec<Pos> = (0..8).map(Pos::Start).chain((0..8).map(Pos::End)).collect();
+    // The bytes each candidate picks from every key. On short keys many candidates clamp
+    // onto the same byte, so their columns are identical.
+    let columns: Vec<Vec<u8>> = cands.iter().map(|&p| keys.iter().map(|k| pick_byte(k, p)).collect()).collect();
+    let mut seen: HashSet<Vec<&Vec<u8>>> = HashSet::new();
+    let mut budget = TOTAL_STEP_BUDGET;
     for k in 0..=MAX_POSITIONS {
-        let combos: Vec<Vec<Pos>> = combinations(cands.len(), k)
+        let combos: Vec<Vec<usize>> = combinations(cands.len(), k)
             .into_iter()
-            .map(|c| c.into_iter().map(|i| cands[i]).collect::<Vec<Pos>>())
-            .filter(|ps| feasible(keys, ps))
+            .filter(|c| {
+                // Skip combinations equivalent to one already kept: the same set of
+                // columns, or two positions that always pick the same byte.
+                let mut cols: Vec<&Vec<u8>> = c.iter().map(|&i| &columns[i]).collect();
+                cols.sort();
+                let len = cols.len();
+                cols.dedup();
+                cols.len() == len && seen.insert(cols)
+            })
+            .filter(|c| feasible(keys, &c.iter().map(|&i| cands[i]).collect::<Vec<Pos>>()))
             .collect();
         for m in [base, base * 2, base * 4, base * 8] {
-            for positions in &combos {
-                if let Some(asso) = assign(keys, positions, m) {
-                    return Some(Strategy::Picked { positions: positions.clone(), asso, mask: (m - 1) as u32 });
+            for c in &combos {
+                let positions: Vec<Pos> = c.iter().map(|&i| cands[i]).collect();
+                if let Some(asso) = assign(keys, &positions, m, &mut budget) {
+                    return Some(Strategy::Picked { positions, asso, mask: (m - 1) as u32 });
+                }
+                if budget == 0 {
+                    return None;
                 }
             }
         }
@@ -105,7 +124,8 @@ fn feasible(keys: &[&[u8]], positions: &[Pos]) -> bool {
 
 /// Depth-first assignment of association values with backtracking. A variable is one
 /// `(position, byte)` table entry; the most-used variables are assigned first.
-fn assign(keys: &[&[u8]], positions: &[Pos], m: usize) -> Option<Vec<[u16; 256]>> {
+/// Charges every step against `budget` as well as the per-attempt limit.
+fn assign(keys: &[&[u8]], positions: &[Pos], m: usize, budget: &mut usize) -> Option<Vec<[u16; 256]>> {
     let var = |pi: usize, b: u8| pi * 256 + b as usize;
     let picks: Vec<Vec<usize>> =
         keys.iter().map(|k| positions.iter().enumerate().map(|(pi, &p)| var(pi, pick_byte(k, p))).collect()).collect();
@@ -162,9 +182,10 @@ fn assign(keys: &[&[u8]], positions: &[Pos], m: usize) -> Option<Vec<[u16; 256]>
             continue;
         }
         steps += 1;
-        if steps > STEP_BUDGET {
+        if steps > STEP_BUDGET || *budget == 0 {
             return None;
         }
+        *budget -= 1;
         values[order[d]] = v;
         match place(d, &values, &mut taken) {
             Some(now) => {
