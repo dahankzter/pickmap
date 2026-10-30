@@ -1,0 +1,20 @@
+[package]
+name = "bench"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+keysets = { path = "../keysets" }
+pickmap = { path = "../pickmap" }
+quickphf = "0.1"
+phf = "0.14"
+frozen-collections = "0.9.3"
+foldhash = "0.2"
+perf-event2 = "0.7"
+
+[build-dependencies]
+keysets = { path = "../keysets" }
+phf_codegen = "0.14"
+quickphf_codegen = "0.1"
+cc = "1.10"
