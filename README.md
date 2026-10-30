@@ -41,14 +41,14 @@ fn main() {
 
 On a Zen 5 machine, with shuffled lookups and branch misses counted, `pickmap` is the
 fastest Rust option on every key set measured:
-- 1.6-5x faster than the best of `phf`, `frozen-collections` and `quickphf` on hit-only and miss-only streams;
-- 1.3-2.2x faster on a 50/50 mix;
+- 1.5-5x faster than the best of `phf`, `frozen-collections` and `quickphf` on hit-only and miss-only streams;
+- 1.25-2.1x faster on a 50/50 mix;
 - within about 2x of Daniel Lemire's C++ `perfect_hash`, which reads past the end of keys.
 
 See [BENCHMARKS.md](BENCHMARKS.md) for the full tables and how to reproduce them.
 
-Planning a 3,000-key map takes about 50 ms in an unoptimized build and 5 ms optimized,
-so macro expansion stays fast without profile tweaks.
+Planning a map stays well under a second without profile tweaks. In an unoptimized build,
+3,000 random words take about 70 ms, and 300 three-letter keys about 250 ms.
 
 ## Limits (version 1)
 
