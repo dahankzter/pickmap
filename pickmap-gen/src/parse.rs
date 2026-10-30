@@ -139,6 +139,11 @@ pub fn parse(input: TokenStream) -> Result<MapInput, Error> {
         let key_span = t.span();
         let key = match &t {
             TokenTree::Literal(lit) => match litrs::StringLit::try_from(lit) {
+                // Rust rejects suffixes on string literals; so do keys.
+                Ok(s) if !s.suffix().is_empty() => {
+                    let msg = format!("keys can't have a suffix: write {:?}, not {lit}", s.value());
+                    return Err(Error::new(key_span, msg));
+                }
                 Ok(s) => s.value().to_owned(),
                 Err(_) => return Err(Error::new(key_span, "keys must be string literals")),
             },
@@ -291,6 +296,8 @@ mod tests {
             (r#"M: u8; "a" =>"#, "expected a value expression"),
             (r#"M: u8; "a" => , "b" => 1"#, "expected a value expression"),
             (r#"M: u8; "a" => 1, "a" => 2"#, "duplicate key \"a\""),
+            (r#"M: u8; "q"abc => 1"#, "keys can't have a suffix: write \"q\", not \"q\"abc"),
+            (r#"M: u8; r"q"x => 1"#, "keys can't have a suffix: write \"q\", not r\"q\"x"),
         ] {
             match p(src) {
                 Ok(_) => panic!("{src:?} parsed"),
