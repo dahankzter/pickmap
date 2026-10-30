@@ -20,7 +20,9 @@ impl<const WORDS: usize> Slot<WORDS> {
         for i in 0..WORDS {
             diff |= self.key[i] ^ v[i];
         }
-        if diff == 0 { Some(self.idx as usize) } else { None }
+        // Through the barrier: otherwise LLVM splits `diff == 0` back into one
+        // compare-and-branch per word, and near-misses mispredict them.
+        if crate::load::opaque(diff) == 0 { Some(self.idx as usize) } else { None }
     }
 
     /// [`Slot::find`] for maps that hold keys longer than 32 bytes: those inputs are
